@@ -1,0 +1,53 @@
+{
+  "name": "show-component",
+  "version": "0.1.0",
+  "description": "Quickly navigate to the line of code that is responsible for rendering a component",
+  "main": "dist/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:cjs && npm run build:esm && npm run build:types",
+    "build:cjs": "tsc",
+    "build:esm": "tsc --module es2015 --outDir dist/esm",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "type-check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "react",
+    "component",
+    "hook",
+    "development",
+    "debugging"
+  ],
+  "author": "Andrey Sidorov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sidorares/show-component.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sidorares/show-component/issues"
+  },
+  "homepage": "https://github.com/sidorares/show-component#readme",
+  "peerDependencies": {
+    "react": ">=16.8.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/react": "^18.3.12",
+    "typescript": "^5.6.3"
+  }
+}
