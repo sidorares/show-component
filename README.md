@@ -21,3 +21,14 @@ import { ShowComponent, useShowComponent } from 'show-component';
 // Or use the hook
 const showComponent = useShowComponent();
 ```
+
+## Features
+
+- 🎯 Quickly navigate to component source code
+- ⚡ Lightweight and fast
+- 🔧 Easy integration with existing React projects
+- 📦 TypeScript support included
+
+## License
+
+MIT
