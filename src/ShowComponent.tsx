@@ -1,8 +1,8 @@
-import { Button } from './components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import JsonView from '@uiw/react-json-view';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from './components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import { resolveLocation } from './lib/source-location-resolver';
 
 // Import types from the API route
