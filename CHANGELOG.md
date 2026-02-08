@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/sidorares/show-component/compare/show-component-v1.0.1...show-component-v1.1.0) (2026-02-08)
+
+
+### Features
+
+* migrate code with main functionality to this repo ([#11](https://github.com/sidorares/show-component/issues/11)) ([08eda42](https://github.com/sidorares/show-component/commit/08eda423c203cd0048c7a7207f362603f3b03995))
+
 ## [1.0.1](https://github.com/sidorares/show-component/compare/show-component-v1.0.0...show-component-v1.0.1) (2025-09-16)
 
 
