@@ -1,6 +1,4 @@
 import { SourceMapConsumer } from '@jridgewell/source-map';
-// Frontend source location resolver
-// Adapted from the backend source-mapper for browser environment
 import * as convertSourceMap from 'convert-source-map';
 
 export interface StackFrameInfo {
@@ -21,11 +19,9 @@ export interface ResolvedSourceInfo extends OriginalSourceInfo {
   sourceContent?: string;
 }
 
-// Cache interfaces for frontend
 interface CachedSourceMapData {
   sourceContent: string;
   sourceMapContent: string;
-  sourceMapConsumer?: unknown; // Parsed source map for reuse
 }
 
 interface CachedResult {
@@ -33,7 +29,6 @@ interface CachedResult {
   timestamp: number;
 }
 
-// Frontend cache system (using Maps like backend)
 const sourceMapCache = new Map<string, CachedSourceMapData>();
 const resultCache = new Map<string, CachedResult>();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
@@ -56,10 +51,14 @@ export function configureSourceRoot(root: string | undefined): void {
 }
 
 function getSourceRoot(): string | undefined {
-  return _sourceRoot
-    ?? (typeof window !== 'undefined'
-      ? (window as Record<string, unknown>).__SHOW_COMPONENT_SOURCE_ROOT__ as string | undefined
-      : undefined);
+  return (
+    _sourceRoot ??
+    (typeof window !== 'undefined'
+      ? ((window as unknown as Record<string, unknown>).__SHOW_COMPONENT_SOURCE_ROOT__ as
+          | string
+          | undefined)
+      : undefined)
+  );
 }
 
 /**
@@ -78,7 +77,7 @@ function getSourceRoot(): string | undefined {
 function resolveSourcePath(
   rawSource: string,
   sourceMapSourceRoot: string | undefined,
-  sourceFileUrl: string,
+  sourceFileUrl: string
 ): string {
   // Already an absolute filesystem path — nothing to do
   if (rawSource.startsWith('/') && !rawSource.startsWith('//')) {
@@ -96,7 +95,7 @@ function resolveSourcePath(
   // If the source map provided a sourceRoot, use it
   if (sourceMapSourceRoot && sourceMapSourceRoot !== '/' && sourceMapSourceRoot !== '') {
     const root = sourceMapSourceRoot.replace(/\/+$/, '');
-    cleaned = root + '/' + cleaned;
+    cleaned = `${root}/${cleaned}`;
   }
 
   // If still relative, resolve against the source file URL
@@ -122,27 +121,23 @@ function resolveSourcePath(
 }
 
 /**
- * Extracts URL, line, and column information from a stack trace line
- * Example input: "at exports.jsxDEV (http://localhost:3000/_next/static/chunks/node_modules_next_ec71d40b._.js:206:102)"
+ * Extracts URL, line, and column from a stack trace frame.
+ *
+ * Supported formats:
+ *   - Chrome/V8:  `at fn (url:line:col)` or `at url:line:col`
+ *   - Firefox/Safari: `fn@url:line:col`
  */
 export function extractStackFrameInfo(stackLine: string): StackFrameInfo | null {
-  // Match various stack trace formats
   const patterns = [
-    // Chrome/V8 format: "at functionName (url:line:column)"
-    /at\s+([^(]+)\s*\((.+):(\d+):(\d+)\)/,
-    // Chrome/V8 format without function name: "at url:line:column"
-    /at\s+(.+):(\d+):(\d+)/,
-    // Firefox format: "functionName@url:line:column"
-    /([^@]+)@(.+):(\d+):(\d+)/,
-    // Safari format: "functionName@url:line:column"
-    /([^@]+)@(.+):(\d+):(\d+)/,
+    /at\s+([^(]+)\s*\((.+):(\d+):(\d+)\)/, // at fn (url:line:col)
+    /at\s+(.+):(\d+):(\d+)/, // at url:line:col
+    /([^@]+)@(.+):(\d+):(\d+)/, // fn@url:line:col
   ];
 
   for (const pattern of patterns) {
     const match = stackLine.match(pattern);
     if (match) {
       if (match.length === 5) {
-        // Format with function name
         return {
           functionName: match[1].trim(),
           url: match[2],
@@ -151,7 +146,6 @@ export function extractStackFrameInfo(stackLine: string): StackFrameInfo | null 
         };
       }
       if (match.length === 4) {
-        // Format without function name
         return {
           url: match[1],
           line: Number.parseInt(match[2], 10),
@@ -165,98 +159,69 @@ export function extractStackFrameInfo(stackLine: string): StackFrameInfo | null 
 }
 
 /**
- * Converts RSC (React Server Component) URL to HTTP URL for fetching
- * RSC URL format: rsc://React/Server/file:///path/to/file.js?param
- * HTTP URL format: /api/dev/source-file/server/chunks/ssr/[filename].js
+ * Converts an RSC (React Server Component) URL to a fetchable HTTP URL.
+ *
+ *   rsc://React/Server/file:///…/.next/server/chunks/ssr/file.js?v=1
+ *   → {origin}/api/dev/source-file/server/chunks/ssr/file.js
  */
 function convertRscUrlToHttp(rscUrl: string): string {
-  // Extract the file path from RSC URL
-  // Format: rsc://React/Server/file:///absolute/path/to/file.js?param
   const match = rscUrl.match(/^rsc:\/\/React\/Server\/file:\/\/(.+?)(\?.*)?$/);
-
   if (!match) {
     throw new Error(`Invalid RSC URL format: ${rscUrl}`);
   }
 
-  const filePath = match[1]; // /absolute/path/to/file.js
-
-  // Extract the part after .next/ from the file path
-  // Example: /Users/laplace/Projects/joboffer.fit/web/.next/server/chunks/ssr/file.js
-  // Should become: server/chunks/ssr/file.js
+  const filePath = match[1];
   const nextIndex = filePath.indexOf('/.next/');
   if (nextIndex === -1) {
     throw new Error(`RSC URL does not contain .next folder: ${rscUrl}`);
   }
 
-  const relativePath = filePath.substring(nextIndex + 7); // +7 to skip '/.next/'
-
-  // Convert to development endpoint URL using path-based routing
+  const relativePath = filePath.substring(nextIndex + 7); // skip '/.next/'
   return `${window.location.origin}/api/dev/source-file/${relativePath}`;
 }
 
-/**
- * Fetches a source file from a URL (browser-compatible)
- * Now supports RSC (React Server Component) URLs
- * Returns both the content and the effective URL used for fetching
- */
+/** Fetches a source file, handling RSC and regular HTTP/relative URLs. */
 export async function fetchSourceFile(
   url: string
 ): Promise<{ content: string; effectiveUrl: string }> {
-  try {
-    let fetchUrl: string;
+  let fetchUrl: string;
 
-    // Handle RSC URLs (React Server Component URLs)
-    if (url.startsWith('rsc://React/Server/')) {
-      fetchUrl = convertRscUrlToHttp(url);
-      console.log(`🔄 Converting RSC URL to HTTP: ${url} -> ${fetchUrl}`);
-    } else {
-      // Handle regular HTTP URLs and relative URLs
-      fetchUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
-    }
-
-    const response = await fetch(fetchUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch source file: ${response.status} ${response.statusText}`);
-    }
-
-    const content = await response.text();
-    return { content, effectiveUrl: fetchUrl };
-  } catch (error) {
-    throw new Error(
-      `Error fetching source file from ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`
-    );
+  if (url.startsWith('rsc://React/Server/')) {
+    fetchUrl = convertRscUrlToHttp(url);
+  } else {
+    fetchUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
   }
+
+  const response = await fetch(fetchUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch source file: ${response.status} ${response.statusText}`);
+  }
+
+  const content = await response.text();
+  return { content, effectiveUrl: fetchUrl };
 }
 
 /**
- * Extracts source map URL from source file content using convert-source-map
+ * Returns `"inline"` for data-URL source maps, the external URL string
+ * for `//# sourceMappingURL=…` comments, or `null` when absent.
+ *
+ * convert-source-map handles inline maps; for external maps we scan the
+ * last 10 lines manually because the library doesn't expose the raw URL.
  */
 function extractSourceMapUrl(sourceContent: string): string | null {
   const converter = convertSourceMap.fromSource(sourceContent);
-
   if (!converter) {
     return null;
   }
 
-  // Get the source map as an object to check if it's inline or external
   const sourceMapObj = converter.toObject();
-
-  // If we have a source map object, it means it was inline (data URL)
-  // For external source maps, we need to look for the comment manually
-  // since convert-source-map doesn't extract the URL for external maps
   if (sourceMapObj && Object.keys(sourceMapObj).length > 0) {
-    // This is an inline source map, we'll handle it differently in resolveSourceMap
     return 'inline';
   }
 
-  // Fallback for external source maps - look for the comment
   const lines = sourceContent.split('\n');
-
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
-    const line = lines[i].trim();
-
-    // Check for sourceMappingURL comment
-    const match = line.match(/^\/\/[@#]\s*sourceMappingURL=(.+)$/);
+    const match = lines[i].trim().match(/^\/\/[@#]\s*sourceMappingURL=(.+)$/);
     if (match) {
       return match[1].trim();
     }
@@ -265,56 +230,42 @@ function extractSourceMapUrl(sourceContent: string): string | null {
   return null;
 }
 
-/**
- * Resolves source map content (inline or external) - browser version
- */
+/** Resolves source map content — inline (data URL) or external (fetched). */
 export async function resolveSourceMap(
   sourceContent: string,
   sourceUrl: string
 ): Promise<string | null> {
   const sourceMapUrl = extractSourceMapUrl(sourceContent);
-
   if (!sourceMapUrl) {
     return null;
   }
 
-  // Check if it's an inline source map
   if (sourceMapUrl === 'inline') {
     const converter = convertSourceMap.fromSource(sourceContent);
-    if (converter) {
-      return converter.toJSON();
-    }
-    return null;
+    return converter ? converter.toJSON() : null;
   }
 
-  // Check if it's a data URL (fallback for cases not handled by convert-source-map)
+  // Data URL fallback for edge cases not handled by convert-source-map
   if (sourceMapUrl.startsWith('data:')) {
-    const match = sourceMapUrl.match(/^data:application\/json;(?:charset=utf-8;)?base64,(.+)$/);
-    if (match) {
-      // Use browser's atob instead of Buffer.from
-      return atob(match[1]);
+    const base64 = sourceMapUrl.match(/^data:application\/json;(?:charset=utf-8;)?base64,(.+)$/);
+    if (base64) {
+      return atob(base64[1]);
     }
-
-    // Handle non-base64 inline source maps
-    const jsonMatch = sourceMapUrl.match(/^data:application\/json;charset=utf-8,(.+)$/);
-    if (jsonMatch) {
-      return decodeURIComponent(jsonMatch[1]);
+    const plainJson = sourceMapUrl.match(/^data:application\/json;charset=utf-8,(.+)$/);
+    if (plainJson) {
+      return decodeURIComponent(plainJson[1]);
     }
-
     return null;
   }
 
-  // External source map - construct absolute URL
+  // External source map — resolve to absolute URL
   let absoluteSourceMapUrl: string;
-
   if (sourceMapUrl.startsWith('http')) {
     absoluteSourceMapUrl = sourceMapUrl;
   } else if (sourceMapUrl.startsWith('/')) {
-    // Absolute path
     const baseUrl = new URL(sourceUrl);
     absoluteSourceMapUrl = `${baseUrl.protocol}//${baseUrl.host}${sourceMapUrl}`;
   } else {
-    // Relative path
     const baseUrl = new URL(sourceUrl);
     const basePath = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
     absoluteSourceMapUrl = `${baseUrl.protocol}//${baseUrl.host}${basePath}${sourceMapUrl}`;
@@ -325,7 +276,6 @@ export async function resolveSourceMap(
     if (!response.ok) {
       throw new Error(`Failed to fetch source map: ${response.status} ${response.statusText}`);
     }
-
     return await response.text();
   } catch (error) {
     console.warn(`Failed to fetch source map from ${absoluteSourceMapUrl}:`, error);
@@ -334,9 +284,8 @@ export async function resolveSourceMap(
 }
 
 /**
- * Maps generated position to original source using source map (browser version).
- * Returns the raw source path as-is from the source map — the caller is
- * responsible for resolving it (see resolveSourcePath).
+ * Maps a generated position to the original source via source map.
+ * Returns the raw source path as-is — the caller resolves it (see `resolveSourcePath`).
  */
 export async function mapToOriginalSource(
   frameInfo: StackFrameInfo,
@@ -345,23 +294,11 @@ export async function mapToOriginalSource(
   try {
     const sourceMap = JSON.parse(sourceMapContent);
 
-    console.log('[sc:sourcemap] metadata:', {
-      sourceRoot: sourceMap.sourceRoot,
-      sources: sourceMap.sources?.slice(0, 5),
-      sourcesLength: sourceMap.sources?.length,
-      file: sourceMap.file,
-    });
-
     const consumer = new SourceMapConsumer(sourceMap);
 
     const originalPosition = consumer.originalPositionFor({
       line: frameInfo.line,
       column: frameInfo.column,
-    });
-
-    console.log('[sc:sourcemap] originalPositionFor', {
-      input: { line: frameInfo.line, column: frameInfo.column },
-      output: originalPosition,
     });
 
     if (
@@ -387,9 +324,7 @@ export async function mapToOriginalSource(
   }
 }
 
-/**
- * Gets original source content from source map (browser version)
- */
+/** Retrieves the original source content embedded in the source map, if available. */
 export async function getOriginalSourceContent(
   originalInfo: OriginalSourceInfo,
   sourceMapContent: string
@@ -408,99 +343,72 @@ export async function getOriginalSourceContent(
 }
 
 /**
- * Cached version of resolveLocation with two-level caching (frontend version)
+ * Resolves a stack trace line to original source location using source maps.
+ * Two-level cache: L1 caches the final resolved result, L2 caches the parsed
+ * source map so multiple positions in the same file are fast.
  */
 export async function resolveLocation(stackLine: string): Promise<ResolvedSourceInfo | null> {
   try {
-    // Step 1: Extract frame info from stack line
     const frameInfo = extractStackFrameInfo(stackLine);
     if (!frameInfo) {
-      console.warn('Could not extract frame info from stack line:', stackLine);
       return null;
     }
 
     const { url, line, column } = frameInfo;
     const cacheKey = `${url}:${line}:${column}`;
 
-    // Level 1 Cache: Check if we have the exact result cached
+    // L1: exact result cache
     const cachedResult = resultCache.get(cacheKey);
     if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_TTL) {
-      console.log('🎯 Frontend cache hit (Level 1 - exact result):', cacheKey);
       return cachedResult.originalSource;
     }
 
-    // Level 2 Cache: Check if we have the source map data cached for this URL
-    // First check with original URL, then try with converted URL for RSC URLs
+    // L2: source map cache (keyed by URL)
     let sourceMapData = sourceMapCache.get(url);
     let effectiveUrl = url;
 
+    // RSC URLs may be cached under their converted HTTP URL
     if (!sourceMapData && url.startsWith('rsc://React/Server/')) {
-      // For RSC URLs, also check cache with the converted HTTP URL
       effectiveUrl = convertRscUrlToHttp(url);
       sourceMapData = sourceMapCache.get(effectiveUrl);
     }
 
     if (!sourceMapData) {
-      console.log('🔄 Frontend cache miss - fetching source and source map for:', url);
-
-      // Step 2: Fetch the source file
       const sourceResult = await fetchSourceFile(url);
       effectiveUrl = sourceResult.effectiveUrl;
 
-      // Step 3: Resolve source map using the effective URL for proper URL resolution
       const sourceMapContent = await resolveSourceMap(
         sourceResult.content,
         sourceResult.effectiveUrl
       );
       if (!sourceMapContent) {
-        console.warn('No source map found for:', url);
         return null;
       }
 
-      // Cache the source map data using both original and effective URLs for better cache hits
       sourceMapData = {
         sourceContent: sourceResult.content,
         sourceMapContent,
       };
-      sourceMapCache.set(url, sourceMapData); // Cache with original URL
+      sourceMapCache.set(url, sourceMapData);
       if (url !== effectiveUrl) {
-        sourceMapCache.set(effectiveUrl, sourceMapData); // Also cache with effective URL
+        sourceMapCache.set(effectiveUrl, sourceMapData);
       }
-      console.log(
-        '💾 Cached source map data for:',
-        url,
-        effectiveUrl !== url ? `and ${effectiveUrl}` : ''
-      );
-    } else {
-      console.log('🎯 Frontend cache hit (Level 2 - source map data):', url);
     }
 
-    // Step 4: Map to original source using cached source map
     const mapResult = await mapToOriginalSource(frameInfo, sourceMapData.sourceMapContent);
     if (!mapResult) {
-      console.warn('Could not map to original source for:', frameInfo);
       return null;
     }
 
-    // Step 4b: Resolve the raw source path from the source map
     const rawSource = mapResult.info.source;
     const resolvedSource = resolveSourcePath(rawSource, mapResult.sourceRoot, effectiveUrl);
-
-    console.log('[sc:resolve] path resolution:', {
-      raw: rawSource,
-      sourceMapRoot: mapResult.sourceRoot,
-      sourceFileUrl: effectiveUrl,
-      configuredRoot: getSourceRoot(),
-      resolved: resolvedSource,
-    });
 
     const originalInfo: OriginalSourceInfo = {
       ...mapResult.info,
       source: resolvedSource,
     };
 
-    // Step 5: Get original source content (optional, usually fast)
-    // Use the RAW source path for content lookup (that's what the source map indexes by)
+    // Use the raw (pre-resolved) path for content lookup — that's what the source map indexes by
     const originalSourceContent = await getOriginalSourceContent(
       { ...originalInfo, source: rawSource },
       sourceMapData.sourceMapContent
@@ -511,12 +419,10 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
       sourceContent: originalSourceContent || undefined,
     };
 
-    // Cache the final result
     resultCache.set(cacheKey, {
       originalSource: result,
       timestamp: Date.now(),
     });
-    console.log('💾 Frontend cached result for:', cacheKey);
 
     return result;
   } catch (error) {
@@ -525,23 +431,32 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
   }
 }
 
-/**
- * Frontend cache cleanup function
- */
+/** Evicts expired entries from the result cache. */
 function cleanupCache() {
   const now = Date.now();
-
-  // Clean up expired results
   for (const [key, value] of resultCache.entries()) {
     if (now - value.timestamp > CACHE_TTL) {
       resultCache.delete(key);
     }
   }
-
-  console.log(
-    `🧹 Frontend cache cleanup completed. Result cache size: ${resultCache.size}, Source map cache size: ${sourceMapCache.size}`
-  );
 }
 
-// Run cleanup every 10 minutes
-setInterval(cleanupCache, 10 * 60 * 1000);
+const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Starts the periodic cache cleanup. Safe to call multiple times. */
+export function startCacheCleanup(): void {
+  if (!cleanupTimer) {
+    cleanupTimer = setInterval(cleanupCache, CLEANUP_INTERVAL);
+  }
+}
+
+/** Stops the periodic cache cleanup and clears all caches. */
+export function stopCacheCleanup(): void {
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
+  }
+  resultCache.clear();
+  sourceMapCache.clear();
+}

@@ -2,29 +2,15 @@ import JsonView from '@uiw/react-json-view';
 import { Braces, ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from './components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
-import { resolveLocation, configureSourceRoot } from './lib/source-location-resolver';
-
-// Import types from the API route
-interface ResolvedSourceInfo {
-  source: string;
-  line: number;
-  column: number;
-  name?: string;
-  sourceContent?: string;
-}
-
-interface ResolvedClickToNodeInfo {
-  componentName: string;
-  /** Raw stack-trace frame line, e.g. "at LevelD (http://…:18:26)" */
-  stackFrame: string | undefined;
-  originalSource?: ResolvedSourceInfo;
-  error?: string;
-}
+import {
+  configureSourceRoot,
+  resolveLocation,
+  startCacheCleanup,
+  stopCacheCleanup,
+} from './lib/source-location-resolver';
 
 type Fiber = {
-  // Can be string, function, or complex React component object
   type: string | ((...args: unknown[]) => unknown) | Record<string, unknown>;
   _debugOwner: Fiber | null;
   _debugStack: Error;
@@ -37,14 +23,6 @@ type ClickToNodeInfo = {
   stackFrame: string | undefined;
   props: Record<string, unknown> | undefined;
 };
-
-type ClickToComponentRequest = {
-  chain: ClickToNodeInfo[];
-  navigateToChild?: boolean;
-  selectedIndex?: number;
-};
-
-// ─── Public types ───────────────────────────────────────────────────────────
 
 export interface NavigationEvent {
   /** Resolved (original) source file path */
@@ -78,50 +56,17 @@ export interface ShowComponentProps {
   sourceRoot?: string;
 }
 
-// Frontend cache for resolved locations
-interface CachedResolvedLocation {
-  source: string;
-  line: number;
-  column: number;
-  timestamp: number;
-}
-
-// In-memory cache for resolved locations
-const resolvedLocationCache = new Map<string, CachedResolvedLocation>();
-
-// Helper function to create cache key from a stack-trace frame line
-function createCacheKey(stackFrame: string): string | null {
-  // Extract URL and position from stack trace
-  const patterns = [
-    /at\s+[^(]+\s*\((.+):(\d+):(\d+)\)/,
-    /at\s+(.+):(\d+):(\d+)/,
-    /[^@]+@(.+):(\d+):(\d+)/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = stackFrame.match(pattern);
-    if (match && match.length >= 4) {
-      const url = match[1];
-      const line = match[2];
-      const column = match[3];
-      return `${url}:${line}:${column}`;
-    }
-  }
-
-  return null;
-}
-
-// Helper function to open file directly in editor using cursor:// protocol.
-// Format: cursor://file/{absolute-path}:{line}:{column}
-// (Same as vscode://file/{path}:{L}:{C} — Cursor inherits VS Code's URL handler.)
-// When an `onNavigate` callback is provided the editor is NOT opened;
-// the callback receives the resolved location instead.
+/**
+ * Opens a file in the editor via the cursor:// protocol (cursor://file/{path}:{L}:{C}).
+ * When `onNavigate` is provided, the callback receives the resolved location
+ * instead of triggering the protocol handler.
+ */
 function openInEditor(
   source: string,
   line: number,
   column: number,
   onNavigate?: ShowComponentProps['onNavigate'],
-  componentName?: string,
+  componentName?: string
 ): void {
   let cleanPath = source.replace(/^file:\/\//, '');
   cleanPath = decodeURIComponent(cleanPath);
@@ -130,16 +75,14 @@ function openInEditor(
   if (onNavigate) {
     onNavigate({ source: cleanPath, line, column, url, componentName });
   } else {
-    // Use location.href for custom protocol URLs — window.open() may fail
-    // to trigger the OS protocol handler in some browsers.  This is the
-    // same approach VS Code's own workbench uses (see BrowserWindow).
+    // location.href (not window.open) is needed for custom protocol URLs —
+    // some browsers won't trigger the OS handler otherwise.
     window.location.href = url;
   }
 }
 
 function getComponentName(fiber: Fiber): string {
   try {
-    // Handle function components
     if (typeof fiber.type === 'function') {
       const func = fiber.type as { name?: string; displayName?: string };
       const name = func.name || func.displayName;
@@ -147,7 +90,7 @@ function getComponentName(fiber: Fiber): string {
         return name;
       }
 
-      // Try to extract name from function string representation
+      // Fallback: parse the function's toString() for a name
       try {
         const funcStr = fiber.type.toString();
         const match = funcStr.match(/^function\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
@@ -155,45 +98,37 @@ function getComponentName(fiber: Fiber): string {
           return match[1];
         }
       } catch {
-        // Ignore toString errors
+        // toString() can throw on exotic callables
       }
 
       return 'Anonymous Function Component';
     }
 
-    // Handle string components (DOM elements)
     if (typeof fiber.type === 'string') {
       return fiber.type;
     }
 
-    // Handle object-type components (forwardRef, memo, etc.)
     if (fiber.type && typeof fiber.type === 'object') {
       const obj = fiber.type as Record<string, unknown>;
 
-      // Handle React.forwardRef
       if (obj.$$typeof && obj.render) {
         const render = obj.render as { name?: string; displayName?: string };
         const renderName = render.name || render.displayName;
-        if (typeof renderName === 'string' && renderName.length > 0) {
-          return `ForwardRef(${renderName})`;
-        }
-        return 'ForwardRef(Anonymous)';
+        return renderName && typeof renderName === 'string'
+          ? `ForwardRef(${renderName})`
+          : 'ForwardRef(Anonymous)';
       }
 
-      // Handle React.memo
       if (obj.$$typeof && obj.type) {
         const wrappedName = getComponentNameFromType(obj.type);
-        if (typeof wrappedName === 'string' && wrappedName.length > 0) {
-          return `Memo(${wrappedName})`;
-        }
-        return 'Memo(Anonymous)';
+        return wrappedName && typeof wrappedName === 'string' && wrappedName.length > 0
+          ? `Memo(${wrappedName})`
+          : 'Memo(Anonymous)';
       }
 
-      // Handle other object types
       if (obj.displayName && typeof obj.displayName === 'string') {
         return obj.displayName;
       }
-
       if (obj.name && typeof obj.name === 'string') {
         return obj.name;
       }
@@ -201,20 +136,16 @@ function getComponentName(fiber: Fiber): string {
       return 'Component (Object Type)';
     }
 
-    // Handle null/undefined
     if (!fiber.type) {
       return 'Component (No Type)';
     }
 
-    // Fallback for any other type
     return 'Component Name Unknown';
-  } catch (error) {
-    console.warn('Error extracting component name:', error);
+  } catch {
     return 'Component Name Unknown';
   }
 }
 
-// Helper function to extract name from various component types
 function getComponentNameFromType(type: unknown): string {
   try {
     if (typeof type === 'string') {
@@ -243,20 +174,17 @@ function getComponentNameFromType(type: unknown): string {
   }
 }
 
-// Configuration: which stack frame to use (0-based, after skipping "Error" line)
-// 0 = first frame (usually React internals like jsxDEV)
-// 1 = second frame (usually the actual user component)
+// Which meaningful stack frame to use (0-based, after filtering React internals).
+// 0 = first non-internal frame (usually jsxDEV), 1 = the actual user component.
 const STACK_FRAME_INDEX = 1;
 
-/** Extracts the relevant stack-trace frame line from a fiber's debug stack. */
+/** Extracts the relevant stack-trace frame from a fiber's `_debugStack`. */
 function getStackFrame(fiber: Fiber): string | undefined {
   const stack = fiber._debugStack?.stack;
   if (!stack) return undefined;
 
   const lines = stack.split('\n');
-
-  // Skip the first line (usually "Error") and filter out React internals
-  const meaningfulLines = [];
+  const meaningfulLines: string[] = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line && !line.includes('react-dom') && !line.includes('scheduler')) {
@@ -264,88 +192,41 @@ function getStackFrame(fiber: Fiber): string | undefined {
     }
   }
 
-  // Return the configured stack frame index, or fallback to first available
   return meaningfulLines[STACK_FRAME_INDEX] || meaningfulLines[0] || lines[1]?.trim();
 }
 
+/** Reads the React fiber attached to a DOM node via the internal `__reactFiber$…` property. */
 function findFiberElementFromNode(node: Node): Fiber | null {
-  // return a property that starts with "__reactFiber"
   const properties = Object.getOwnPropertyNames(node);
-  const fiberProperty = properties.find((property) => property.startsWith('__reactFiber'));
+  const fiberProperty = properties.find((p) => p.startsWith('__reactFiber'));
+  if (!fiberProperty) return null;
   return node[fiberProperty as keyof typeof node] as unknown as Fiber;
 }
 
-// Client-side version using frontend source location resolver
-async function resolveSources(
-  request: ClickToComponentRequest,
-  onNavigate?: ShowComponentProps['onNavigate'],
-) {
+/**
+ * Resolves the source location for a single component and opens the editor.
+ * Delegates to the resolver's own two-level cache.
+ */
+async function resolveAndNavigate(
+  component: ClickToNodeInfo,
+  onNavigate?: ShowComponentProps['onNavigate']
+): Promise<boolean> {
+  if (!component.stackFrame) return false;
+
   try {
-    console.log('🔄 Client-side source resolution for request:', request);
-
-    const resolvedChain: ResolvedClickToNodeInfo[] = await Promise.all(
-      request.chain.map(async (node) => {
-        if (!node.stackFrame) {
-          return {
-            ...node,
-            error: 'No stack frame available',
-          };
-        }
-
-        try {
-          const originalSource = await resolveLocation(node.stackFrame);
-          return {
-            componentName: node.componentName,
-            stackFrame: node.stackFrame,
-            originalSource: originalSource || undefined,
-            error: originalSource ? undefined : 'Could not resolve to original source',
-          };
-        } catch (error) {
-          return {
-            componentName: node.componentName,
-            stackFrame: node.stackFrame,
-            error: `Error resolving source: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          };
-        }
-      })
-    );
-
-    console.log('✅ Client-side resolved chain:', resolvedChain);
-
-    // Cache resolved locations for future use (same as server version)
-    for (const node of resolvedChain) {
-      if (node.originalSource && node.stackFrame) {
-        const cacheKey = createCacheKey(node.stackFrame);
-        if (cacheKey) {
-          resolvedLocationCache.set(cacheKey, {
-            source: node.originalSource.source,
-            line: node.originalSource.line,
-            column: node.originalSource.column,
-            timestamp: Date.now(),
-          });
-        }
-      }
-    }
-
-    // Handle navigation if requested (same logic as server version)
-    if (request.navigateToChild && request.selectedIndex !== undefined) {
-      const selectedComponent = resolvedChain[request.selectedIndex];
-      if (selectedComponent?.originalSource) {
-        const { source, line, column } = selectedComponent.originalSource;
-        console.log('🎯 Client-side navigation to:', { source, line, column });
-        openInEditor(source, line, column, onNavigate, selectedComponent.componentName);
-        return true; // Indicate successful navigation
-      }
-      console.error(
-        '❌ Selected component could not be resolved to original source:',
-        selectedComponent
+    const resolved = await resolveLocation(component.stackFrame);
+    if (resolved) {
+      openInEditor(
+        resolved.source,
+        resolved.line,
+        resolved.column,
+        onNavigate,
+        component.componentName
       );
-      return false;
+      return true;
     }
-
-    return true; // Indicate successful resolution
-  } catch (error) {
-    console.error('❌ Error in client-side source resolution:', error);
+    return false;
+  } catch {
     return false;
   }
 }
@@ -356,10 +237,14 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
 
-  // Sync sourceRoot prop → resolver config
   useEffect(() => {
     configureSourceRoot(sourceRoot);
   }, [sourceRoot]);
+
+  useEffect(() => {
+    startCacheCleanup();
+    return stopCacheCleanup;
+  }, []);
 
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [fibersChain, setFibersChain] = useState<ClickToNodeInfo[]>([]);
@@ -388,91 +273,38 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
   } | null>(null);
 
   const handleComponentClick = async (index: number) => {
-    const selectedComponent = fibersChain[index];
-    if (!selectedComponent.stackFrame) {
-      console.warn('No stack frame available for component:', selectedComponent.componentName);
-      setIsPopoverOpen(false);
-      return;
-    }
-
-    // Check frontend cache first (Hot scenario)
-    const cacheKey = createCacheKey(selectedComponent.stackFrame);
-    if (cacheKey) {
-      const cachedLocation = resolvedLocationCache.get(cacheKey);
-
-      if (cachedLocation) {
-        console.log('🎯 Frontend cache hit - opening directly:', cacheKey); // Try to open directly using protocol
-        openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column, onNavigateRef.current, selectedComponent.componentName);
-        setIsPopoverOpen(false);
-      }
-    }
-
-    // Cold scenario - make server request
-    console.log('🔄 Frontend cache miss - making server request');
-    const request: ClickToComponentRequest = {
-      chain: fibersChain,
-      navigateToChild: true,
-      selectedIndex: index,
-    };
-
-    await resolveSources(request, onNavigateRef.current);
     setIsPopoverOpen(false);
+    await resolveAndNavigate(fibersChain[index], onNavigateRef.current);
   };
 
-  // Navigate to a component's source directly (used from props popup)
   const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
-    if (!component.stackFrame) return;
-
-    // Check cache first
-    const cacheKey = createCacheKey(component.stackFrame);
-    if (cacheKey) {
-      const cached = resolvedLocationCache.get(cacheKey);
-      if (cached) {
-        openInEditor(cached.source, cached.line, cached.column, onNavigateRef.current, component.componentName);
-        return;
-      }
-    }
-
-    // Cold path — resolve via source maps
-    const request: ClickToComponentRequest = {
-      chain: [component],
-      navigateToChild: true,
-      selectedIndex: 0,
-    };
-    await resolveSources(request, onNavigateRef.current);
+    await resolveAndNavigate(component, onNavigateRef.current);
   };
 
   const handlePropsClick = (component: ClickToNodeInfo) => {
-    // Generate unique ID for this popup
     const popupId = `props-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Smart positioning with viewport boundary checks
     const popupWidth = 400;
     const popupHeight = 300;
     const cascadeOffset = 40;
 
-    // Calculate base position with cascade
     let baseX = 200 + propsPopups.length * cascadeOffset;
     let baseY = 200 + propsPopups.length * cascadeOffset;
 
-    // Viewport boundary checks
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
-    // If popup would go off-screen horizontally, wrap to next "column"
+    // Wrap to next column when cascading would go off-screen
     if (baseX + popupWidth > viewportWidth - 20) {
-      const column = Math.floor(propsPopups.length / 5); // New column every 5 popups
+      const column = Math.floor(propsPopups.length / 5);
       const row = propsPopups.length % 5;
-      baseX = 50 + column * 200; // Reduced spacing for columns
+      baseX = 50 + column * 200;
       baseY = 100 + row * cascadeOffset;
     }
-
-    // If still off-screen vertically, reset to top
     if (baseY + popupHeight > viewportHeight - 20) {
       baseY = 100;
     }
 
-    // Always create a new popup - allow multiple dialogs for the same component
     const newPopup: PropsPopup = {
       id: popupId,
       component,
@@ -533,13 +365,23 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
         if (dir.includes('s')) newH = Math.max(MIN_H, resizingPopup.startH + dy);
         if (dir.includes('w')) {
           const proposed = resizingPopup.startW - dx;
-          if (proposed >= MIN_W) { newW = proposed; newX = resizingPopup.startPosX + dx; }
-          else { newW = MIN_W; newX = resizingPopup.startPosX + (resizingPopup.startW - MIN_W); }
+          if (proposed >= MIN_W) {
+            newW = proposed;
+            newX = resizingPopup.startPosX + dx;
+          } else {
+            newW = MIN_W;
+            newX = resizingPopup.startPosX + (resizingPopup.startW - MIN_W);
+          }
         }
         if (dir.includes('n')) {
           const proposed = resizingPopup.startH - dy;
-          if (proposed >= MIN_H) { newH = proposed; newY = resizingPopup.startPosY + dy; }
-          else { newH = MIN_H; newY = resizingPopup.startPosY + (resizingPopup.startH - MIN_H); }
+          if (proposed >= MIN_H) {
+            newH = proposed;
+            newY = resizingPopup.startPosY + dy;
+          } else {
+            newH = MIN_H;
+            newY = resizingPopup.startPosY + (resizingPopup.startH - MIN_H);
+          }
         }
 
         setPropsPopups((prev) =>
@@ -563,141 +405,93 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
     setPropsPopups((prev) => prev.filter((p) => p.id !== popupId));
   };
 
-  const startResize = (popupId: string, direction: string, popup: PropsPopup) => (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setResizingPopup({
-      id: popupId,
-      direction,
-      startX: e.clientX,
-      startY: e.clientY,
-      startW: popup.size.width,
-      startH: popup.size.height,
-      startPosX: popup.position.x,
-      startPosY: popup.position.y,
-    });
-  };
-
-  useEffect(() => {
-    const handleContextMenu = (event: MouseEvent) => {
-      // Check for Option+Shift+Right Click (Alt+Shift+Right Click)
-      if (event.altKey && event.shiftKey) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const target = event.target as HTMLElement;
-        const chain: ClickToNodeInfo[] = [];
-        let fiber = findFiberElementFromNode(target);
-
-        while (fiber) {
-          // Extract props from the fiber
-          let props: Record<string, unknown> | undefined;
-          try {
-            if (fiber.memoizedProps) {
-              props = fiber.memoizedProps as Record<string, unknown>;
-            }
-          } catch (error) {
-            console.warn('Failed to extract props for component:', getComponentName(fiber), error);
-            props = undefined;
-          }
-
-          chain.push({
-            componentName: getComponentName(fiber),
-            stackFrame: getStackFrame(fiber),
-            props,
-          });
-          fiber = fiber._debugOwner;
-        }
-
-        if (chain.length > 0) {
-          setFibersChain(chain);
-          setPopoverPosition({ x: event.clientX, y: event.clientY });
-          setIsPopoverOpen(true);
-        }
-
-        return;
-      }
-
-      // Option+Right Click: Navigate directly to top element
-      if (event.altKey && !event.shiftKey) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const target = event.target as HTMLElement;
-        const chain: ClickToNodeInfo[] = [];
-        let fiber = findFiberElementFromNode(target);
-
-        while (fiber) {
-          // Extract props from the fiber
-          let props: Record<string, unknown> | undefined;
-          try {
-            if (fiber.memoizedProps) {
-              props = fiber.memoizedProps as Record<string, unknown>;
-            }
-          } catch (error) {
-            console.warn('Failed to extract props for component:', getComponentName(fiber), error);
-            props = undefined;
-          }
-
-          chain.push({
-            componentName: getComponentName(fiber),
-            stackFrame: getStackFrame(fiber),
-            props,
-          });
-          fiber = fiber._debugOwner;
-        }
-
-        // Navigate directly to the first (top) component in the chain
-        if (chain.length > 0) {
-          const topComponent = chain[0];
-          if (topComponent.stackFrame) {
-            // Check frontend cache first
-            const cacheKey = createCacheKey(topComponent.stackFrame);
-            if (cacheKey) {
-              const cachedLocation = resolvedLocationCache.get(cacheKey);
-
-              if (cachedLocation) {
-                console.log('🎯 Frontend cache hit - opening directly:', cacheKey);
-                openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column, onNavigateRef.current, topComponent.componentName);
-                return;
-              }
-            }
-
-            // Cold scenario - make server request
-            console.log('🔄 Frontend cache miss - making server request for top component');
-            const request: ClickToComponentRequest = {
-              chain,
-              navigateToChild: true,
-              selectedIndex: 0, // Always navigate to the first (top) component
-            };
-
-            resolveSources(request, onNavigateRef.current);
-          }
-        }
-
-        return;
-      }
+  const startResize =
+    (popupId: string, direction: string, popup: PropsPopup) => (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setResizingPopup({
+        id: popupId,
+        direction,
+        startX: e.clientX,
+        startY: e.clientY,
+        startW: popup.size.width,
+        startH: popup.size.height,
+        startPosX: popup.position.x,
+        startPosY: popup.position.y,
+      });
     };
 
-    document.addEventListener('contextmenu', handleContextMenu, true); // Use capture phase
+  useEffect(() => {
+    /** Walks the fiber tree from a DOM node upward through `_debugOwner`. */
+    function buildFiberChain(target: HTMLElement): ClickToNodeInfo[] {
+      const chain: ClickToNodeInfo[] = [];
+      let fiber = findFiberElementFromNode(target);
 
+      while (fiber) {
+        let props: Record<string, unknown> | undefined;
+        try {
+          if (fiber.memoizedProps) {
+            props = fiber.memoizedProps as Record<string, unknown>;
+          }
+        } catch {
+          props = undefined;
+        }
+
+        chain.push({
+          componentName: getComponentName(fiber),
+          stackFrame: getStackFrame(fiber),
+          props,
+        });
+        fiber = fiber._debugOwner;
+      }
+      return chain;
+    }
+
+    const handleContextMenu = (event: MouseEvent) => {
+      if (!event.altKey) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const chain = buildFiberChain(event.target as HTMLElement);
+      if (chain.length === 0) return;
+
+      // Alt+Shift+RightClick: show the component chain popover
+      if (event.shiftKey) {
+        setFibersChain(chain);
+        setPopoverPosition({ x: event.clientX, y: event.clientY });
+        setIsPopoverOpen(true);
+        return;
+      }
+
+      // Alt+RightClick: navigate directly to the top component
+      resolveAndNavigate(chain[0], onNavigateRef.current);
+    };
+
+    // Capture phase so we intercept before the default context menu
+    document.addEventListener('contextmenu', handleContextMenu, true);
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu, true);
     };
   }, []);
 
-  // Handle dragging / resizing events for multiple popups
   useEffect(() => {
     const active = draggingPopup || resizingPopup;
     if (active) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
       const resizeCursors: Record<string, string> = {
-        n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
-        ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
+        n: 'ns-resize',
+        s: 'ns-resize',
+        e: 'ew-resize',
+        w: 'ew-resize',
+        ne: 'nesw-resize',
+        sw: 'nesw-resize',
+        nw: 'nwse-resize',
+        se: 'nwse-resize',
       };
       document.body.style.cursor = resizingPopup
-        ? (resizeCursors[resizingPopup.direction] || 'nwse-resize')
+        ? resizeCursors[resizingPopup.direction] || 'nwse-resize'
         : 'grabbing';
       document.body.style.userSelect = 'none';
     } else {
@@ -717,7 +511,7 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
 
   return (
     <>
-      {/* Scoped styles — self-contained, no Tailwind CSS vars needed */}
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static CSS string, no user input */}
       <style dangerouslySetInnerHTML={{ __html: SC_STYLES }} />
 
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
@@ -747,15 +541,13 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
         >
           <div style={{ padding: '8px 6px' }}>
             {fibersChain.map((component, index) => {
-              const hasProps = component.props &&
-                Object.keys(component.props).some((k) => k !== 'children');
+              const hasProps =
+                component.props && Object.keys(component.props).some((k) => k !== 'children');
 
               return (
-                <div
-                  key={`${component.componentName}-${index}`}
-                  className="sc-chain-row"
-                >
+                <div key={`${component.componentName}-${index}`} className="sc-chain-row">
                   <button
+                    type="button"
                     className="sc-chain-item"
                     onClick={() => handleComponentClick(index)}
                   >
@@ -763,6 +555,7 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
                   </button>
                   {hasProps && (
                     <button
+                      type="button"
                       className="sc-icon-btn"
                       onClick={() => handlePropsClick(component)}
                       title="Inspect props"
@@ -777,7 +570,6 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
         </PopoverContent>
       </Popover>
 
-      {/* Multiple Draggable Props Popups */}
       {propsPopups.map((popup, index) => (
         <div
           key={popup.id}
@@ -794,12 +586,11 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
             boxShadow: '0 10px 25px -5px rgba(0,0,0,.15), 0 4px 10px -4px rgba(0,0,0,.08)',
             overflow: 'hidden',
             display: 'flex',
-            flexDirection: 'column' as const,
+            flexDirection: 'column',
             color: '#1f2937',
           }}
           onMouseDown={handleMouseDown(popup.id)}
         >
-          {/* Title bar */}
           <div
             className="drag-handle"
             style={{
@@ -814,11 +605,10 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
               flexShrink: 0,
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 13 }}>
-              {popup.component.componentName}
-            </span>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>{popup.component.componentName}</span>
             <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <button
+                type="button"
                 className="sc-icon-btn"
                 onClick={() => handleNavigateFromPopup(popup.component)}
                 title="Go to source"
@@ -826,16 +616,29 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
                 <ExternalLink size={13} strokeWidth={2} />
               </button>
               <button
+                type="button"
                 className="sc-icon-btn"
                 onClick={() => closePopup(popup.id)}
                 title="Close"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                <svg
+                  aria-hidden="true"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
               </button>
             </div>
           </div>
 
-          {/* Props content */}
           <div
             style={{
               flex: 1,
@@ -858,7 +661,10 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
             {popup.component.props ? (
               <JsonView
                 value={popup.component.props}
-                style={{ fontSize: '12px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                }}
                 collapsed={1}
                 displayDataTypes={false}
                 displayObjectSize={false}
@@ -869,8 +675,7 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
             )}
           </div>
 
-          {/* Edge & corner resize handles */}
-          {(['n','s','e','w','ne','nw','se','sw'] as const).map((dir) => (
+          {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const).map((dir) => (
             <div
               key={dir}
               className={`sc-resize-edge sc-resize-${dir}`}
@@ -883,10 +688,8 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
   );
 }
 
-// ─── Scoped CSS for the popover & popup chrome ──────────────────────────────
-// Injected via <style> so the component is fully self-contained and doesn't
-// depend on Tailwind CSS variables being defined in the consumer's app.
-
+// Scoped CSS injected via <style> — keeps the component self-contained
+// without requiring Tailwind CSS variables in the consumer's app.
 const SC_STYLES = `
 .sc-chain-row {
   display: flex;
@@ -930,7 +733,7 @@ const SC_STYLES = `
   background-color: #e5e7eb;
   color: #1f2937;
 }
-/* Edge & corner resize handles — invisible hit zones */
+/* Resize handles — invisible hit zones */
 .sc-resize-edge { position: absolute; z-index: 1; }
 .sc-resize-n  { top: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
 .sc-resize-s  { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
