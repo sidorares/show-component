@@ -6,8 +6,6 @@ import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover
 import {
   configureSourceRoot,
   resolveLocation,
-  startCacheCleanup,
-  stopCacheCleanup,
 } from './lib/source-location-resolver';
 
 type Fiber = {
@@ -240,11 +238,6 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
   useEffect(() => {
     configureSourceRoot(sourceRoot);
   }, [sourceRoot]);
-
-  useEffect(() => {
-    startCacheCleanup();
-    return stopCacheCleanup;
-  }, []);
 
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [fibersChain, setFibersChain] = useState<ClickToNodeInfo[]>([]);

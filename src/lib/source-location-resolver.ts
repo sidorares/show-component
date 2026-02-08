@@ -26,12 +26,26 @@ interface CachedSourceMapData {
 
 interface CachedResult {
   originalSource: ResolvedSourceInfo;
-  timestamp: number;
+}
+
+const MAX_RESULT_CACHE_SIZE = 500;
+const MAX_SOURCE_MAP_CACHE_SIZE = 100;
+
+/** Sets a value on a Map, evicting the oldest entry if the map exceeds `maxSize`. */
+function boundedSet<K, V>(map: Map<K, V>, key: K, value: V, maxSize: number): void {
+  map.delete(key); // re-insert to refresh position (Map preserves insertion order)
+  map.set(key, value);
+  if (map.size > maxSize) {
+    // The first key is the oldest entry
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) {
+      map.delete(oldest);
+    }
+  }
 }
 
 const sourceMapCache = new Map<string, CachedSourceMapData>();
 const resultCache = new Map<string, CachedResult>();
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 // ─── Source root configuration ──────────────────────────────────────────────
 // Allows converting URL-relative paths (e.g. /src/scenarios/DeepChain.tsx)
@@ -359,7 +373,7 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
 
     // L1: exact result cache
     const cachedResult = resultCache.get(cacheKey);
-    if (cachedResult && Date.now() - cachedResult.timestamp < CACHE_TTL) {
+    if (cachedResult) {
       return cachedResult.originalSource;
     }
 
@@ -389,9 +403,9 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
         sourceContent: sourceResult.content,
         sourceMapContent,
       };
-      sourceMapCache.set(url, sourceMapData);
+      boundedSet(sourceMapCache, url, sourceMapData, MAX_SOURCE_MAP_CACHE_SIZE);
       if (url !== effectiveUrl) {
-        sourceMapCache.set(effectiveUrl, sourceMapData);
+        boundedSet(sourceMapCache, effectiveUrl, sourceMapData, MAX_SOURCE_MAP_CACHE_SIZE);
       }
     }
 
@@ -419,10 +433,7 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
       sourceContent: originalSourceContent || undefined,
     };
 
-    resultCache.set(cacheKey, {
-      originalSource: result,
-      timestamp: Date.now(),
-    });
+    boundedSet(resultCache, cacheKey, { originalSource: result }, MAX_RESULT_CACHE_SIZE);
 
     return result;
   } catch (error) {
@@ -431,32 +442,8 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
   }
 }
 
-/** Evicts expired entries from the result cache. */
-function cleanupCache() {
-  const now = Date.now();
-  for (const [key, value] of resultCache.entries()) {
-    if (now - value.timestamp > CACHE_TTL) {
-      resultCache.delete(key);
-    }
-  }
-}
-
-const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-/** Starts the periodic cache cleanup. Safe to call multiple times. */
-export function startCacheCleanup(): void {
-  if (!cleanupTimer) {
-    cleanupTimer = setInterval(cleanupCache, CLEANUP_INTERVAL);
-  }
-}
-
-/** Stops the periodic cache cleanup and clears all caches. */
-export function stopCacheCleanup(): void {
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
-  }
+/** Clears all caches. */
+export function clearCaches(): void {
   resultCache.clear();
   sourceMapCache.clear();
 }
