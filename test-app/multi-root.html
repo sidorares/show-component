@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>show-component — Multi-Root Test</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <header class="page-header">
+    <h1>Multi-Root Test Page</h1>
+    <p>Two independent React roots on the same page. Each has its own <code>&lt;ShowComponent /&gt;</code>.</p>
+    <a href="/" class="back-link">← Back to main test page</a>
+  </header>
+
+  <div class="multi-root-layout">
+    <div class="root-container">
+      <h2>React Root #1</h2>
+      <div id="root-1"></div>
+    </div>
+    <div class="root-container">
+      <h2>React Root #2</h2>
+      <div id="root-2"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main-multi-root.tsx"></script>
+</body>
+</html>

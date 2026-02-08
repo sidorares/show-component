@@ -1,0 +1,36 @@
+{
+  "name": "show-component-test-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:sourcemap-linked": "VITE_SOURCEMAP=linked vite build",
+    "build:sourcemap-hidden": "VITE_SOURCEMAP=hidden vite build",
+    "preview": "vite preview",
+    "preview:linked": "npm run build:sourcemap-linked && vite preview",
+    "preview:hidden": "npm run build:sourcemap-hidden && vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jridgewell/source-map": "^0.3.11",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@uiw/react-json-view": "^2.0.0-alpha.37",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "convert-source-map": "^2.0.0",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwind-merge": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/convert-source-map": "^2.0.3",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0"
+  }
+}

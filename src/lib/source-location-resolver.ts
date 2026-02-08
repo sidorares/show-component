@@ -38,6 +38,89 @@ const sourceMapCache = new Map<string, CachedSourceMapData>();
 const resultCache = new Map<string, CachedResult>();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
+// ─── Source root configuration ──────────────────────────────────────────────
+// Allows converting URL-relative paths (e.g. /src/scenarios/DeepChain.tsx)
+// into absolute filesystem paths that the editor can open.
+//
+// Set via:
+//   1. configureSourceRoot('/absolute/path/to/project')    — programmatic
+//   2. window.__SHOW_COMPONENT_SOURCE_ROOT__ = '/abs/path'  — global
+//   3. <ShowComponent sourceRoot="/abs/path" />              — prop (calls #1)
+//
+// When unset, resolved paths are URL-relative (e.g. /src/scenarios/Foo.tsx).
+
+let _sourceRoot: string | undefined;
+
+export function configureSourceRoot(root: string | undefined): void {
+  _sourceRoot = root ? root.replace(/\/+$/, '') : undefined;
+}
+
+function getSourceRoot(): string | undefined {
+  return _sourceRoot
+    ?? (typeof window !== 'undefined'
+      ? (window as Record<string, unknown>).__SHOW_COMPONENT_SOURCE_ROOT__ as string | undefined
+      : undefined);
+}
+
+/**
+ * Resolves a potentially-relative source path from a source map against
+ * the URL of the file that contained the source map.
+ *
+ * Example:
+ *   rawSource  = "DeepChain.tsx"
+ *   sourceUrl  = "http://localhost:5200/src/scenarios/DeepChain.tsx"
+ *   sourceRoot from source map = "" (empty)
+ *   → resolved = "/src/scenarios/DeepChain.tsx"
+ *
+ * If a filesystem sourceRoot is configured:
+ *   → "/Users/me/project/src/scenarios/DeepChain.tsx"
+ */
+function resolveSourcePath(
+  rawSource: string,
+  sourceMapSourceRoot: string | undefined,
+  sourceFileUrl: string,
+): string {
+  // Already an absolute filesystem path — nothing to do
+  if (rawSource.startsWith('/') && !rawSource.startsWith('//')) {
+    const fsRoot = getSourceRoot();
+    // If it already looks absolute AND has enough depth, trust it
+    if (rawSource.includes('/src/') || rawSource.includes('/node_modules/')) {
+      return rawSource;
+    }
+    return fsRoot ? fsRoot + rawSource : rawSource;
+  }
+
+  // Strip webpack:/// or similar protocol prefixes
+  let cleaned = rawSource.replace(/^webpack:\/\/\//, '').replace(/^\.\/?/, '');
+
+  // If the source map provided a sourceRoot, use it
+  if (sourceMapSourceRoot && sourceMapSourceRoot !== '/' && sourceMapSourceRoot !== '') {
+    const root = sourceMapSourceRoot.replace(/\/+$/, '');
+    cleaned = root + '/' + cleaned;
+  }
+
+  // If still relative, resolve against the source file URL
+  if (!cleaned.startsWith('/') && !cleaned.startsWith('http')) {
+    try {
+      const base = new URL(sourceFileUrl);
+      const dir = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
+      cleaned = dir + cleaned;
+      // Normalize /../ and /./ sequences
+      cleaned = new URL(cleaned, base.origin).pathname;
+    } catch {
+      // If URL parsing fails, fall through with what we have
+    }
+  }
+
+  // If a filesystem source root is configured, convert URL path → absolute path
+  const fsRoot = getSourceRoot();
+  if (fsRoot && cleaned.startsWith('/')) {
+    return fsRoot + cleaned;
+  }
+
+  return cleaned;
+}
+
 /**
  * Extracts URL, line, and column information from a stack trace line
  * Example input: "at exports.jsxDEV (http://localhost:3000/_next/static/chunks/node_modules_next_ec71d40b._.js:206:102)"
@@ -251,19 +334,34 @@ export async function resolveSourceMap(
 }
 
 /**
- * Maps generated position to original source using source map (browser version)
+ * Maps generated position to original source using source map (browser version).
+ * Returns the raw source path as-is from the source map — the caller is
+ * responsible for resolving it (see resolveSourcePath).
  */
 export async function mapToOriginalSource(
   frameInfo: StackFrameInfo,
   sourceMapContent: string
-): Promise<OriginalSourceInfo | null> {
+): Promise<{ info: OriginalSourceInfo; sourceRoot?: string } | null> {
   try {
     const sourceMap = JSON.parse(sourceMapContent);
+
+    console.log('[sc:sourcemap] metadata:', {
+      sourceRoot: sourceMap.sourceRoot,
+      sources: sourceMap.sources?.slice(0, 5),
+      sourcesLength: sourceMap.sources?.length,
+      file: sourceMap.file,
+    });
+
     const consumer = new SourceMapConsumer(sourceMap);
 
     const originalPosition = consumer.originalPositionFor({
       line: frameInfo.line,
       column: frameInfo.column,
+    });
+
+    console.log('[sc:sourcemap] originalPositionFor', {
+      input: { line: frameInfo.line, column: frameInfo.column },
+      output: originalPosition,
     });
 
     if (
@@ -272,10 +370,13 @@ export async function mapToOriginalSource(
       originalPosition.column !== null
     ) {
       return {
-        source: originalPosition.source,
-        line: originalPosition.line,
-        column: originalPosition.column,
-        name: originalPosition.name || undefined,
+        info: {
+          source: originalPosition.source,
+          line: originalPosition.line,
+          column: originalPosition.column,
+          name: originalPosition.name || undefined,
+        },
+        sourceRoot: sourceMap.sourceRoot,
       };
     }
 
@@ -375,15 +476,33 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
     }
 
     // Step 4: Map to original source using cached source map
-    const originalInfo = await mapToOriginalSource(frameInfo, sourceMapData.sourceMapContent);
-    if (!originalInfo) {
+    const mapResult = await mapToOriginalSource(frameInfo, sourceMapData.sourceMapContent);
+    if (!mapResult) {
       console.warn('Could not map to original source for:', frameInfo);
       return null;
     }
 
+    // Step 4b: Resolve the raw source path from the source map
+    const rawSource = mapResult.info.source;
+    const resolvedSource = resolveSourcePath(rawSource, mapResult.sourceRoot, effectiveUrl);
+
+    console.log('[sc:resolve] path resolution:', {
+      raw: rawSource,
+      sourceMapRoot: mapResult.sourceRoot,
+      sourceFileUrl: effectiveUrl,
+      configuredRoot: getSourceRoot(),
+      resolved: resolvedSource,
+    });
+
+    const originalInfo: OriginalSourceInfo = {
+      ...mapResult.info,
+      source: resolvedSource,
+    };
+
     // Step 5: Get original source content (optional, usually fast)
+    // Use the RAW source path for content lookup (that's what the source map indexes by)
     const originalSourceContent = await getOriginalSourceContent(
-      originalInfo,
+      { ...originalInfo, source: rawSource },
       sourceMapData.sourceMapContent
     );
 

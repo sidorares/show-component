@@ -1,9 +1,10 @@
 import JsonView from '@uiw/react-json-view';
+import { Braces, ExternalLink } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from './components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
-import { resolveLocation } from './lib/source-location-resolver';
+import { resolveLocation, configureSourceRoot } from './lib/source-location-resolver';
 
 // Import types from the API route
 interface ResolvedSourceInfo {
@@ -16,7 +17,8 @@ interface ResolvedSourceInfo {
 
 interface ResolvedClickToNodeInfo {
   componentName: string;
-  sourceUrl: string | undefined;
+  /** Raw stack-trace frame line, e.g. "at LevelD (http://…:18:26)" */
+  stackFrame: string | undefined;
   originalSource?: ResolvedSourceInfo;
   error?: string;
 }
@@ -31,7 +33,8 @@ type Fiber = {
 
 type ClickToNodeInfo = {
   componentName: string;
-  sourceUrl: string | undefined;
+  /** Raw stack-trace frame line, e.g. "at LevelD (http://…:18:26)" */
+  stackFrame: string | undefined;
   props: Record<string, unknown> | undefined;
 };
 
@@ -40,6 +43,40 @@ type ClickToComponentRequest = {
   navigateToChild?: boolean;
   selectedIndex?: number;
 };
+
+// ─── Public types ───────────────────────────────────────────────────────────
+
+export interface NavigationEvent {
+  /** Resolved (original) source file path */
+  source: string;
+  /** Line number in the original source */
+  line: number;
+  /** Column number in the original source */
+  column: number;
+  /** The cursor:// URL that would have been opened */
+  url: string;
+  /** The component name that was navigated to, when available */
+  componentName?: string;
+}
+
+export interface ShowComponentProps {
+  /**
+   * Called when the user triggers a navigation (Alt+Click or selecting a
+   * component from the chain popover).  When provided the default
+   * `window.open("cursor://…")` call is skipped; the consumer decides
+   * what to do with the resolved location.
+   */
+  onNavigate?: (event: NavigationEvent) => void;
+
+  /**
+   * Absolute filesystem path to the project root.  Used to convert
+   * URL-relative paths (like `/src/components/Foo.tsx`) into absolute
+   * paths the editor can open (like `/Users/me/project/src/components/Foo.tsx`).
+   *
+   * Can also be set globally via `window.__SHOW_COMPONENT_SOURCE_ROOT__`.
+   */
+  sourceRoot?: string;
+}
 
 // Frontend cache for resolved locations
 interface CachedResolvedLocation {
@@ -52,8 +89,8 @@ interface CachedResolvedLocation {
 // In-memory cache for resolved locations
 const resolvedLocationCache = new Map<string, CachedResolvedLocation>();
 
-// Helper function to create cache key from source URL
-function createCacheKey(sourceUrl: string): string | null {
+// Helper function to create cache key from a stack-trace frame line
+function createCacheKey(stackFrame: string): string | null {
   // Extract URL and position from stack trace
   const patterns = [
     /at\s+[^(]+\s*\((.+):(\d+):(\d+)\)/,
@@ -62,7 +99,7 @@ function createCacheKey(sourceUrl: string): string | null {
   ];
 
   for (const pattern of patterns) {
-    const match = sourceUrl.match(pattern);
+    const match = stackFrame.match(pattern);
     if (match && match.length >= 4) {
       const url = match[1];
       const line = match[2];
@@ -74,12 +111,30 @@ function createCacheKey(sourceUrl: string): string | null {
   return null;
 }
 
-// Helper function to open file directly in editor using code:// protocol
-function openInEditor(source: string, line: number, column: number): void {
+// Helper function to open file directly in editor using cursor:// protocol.
+// Format: cursor://file/{absolute-path}:{line}:{column}
+// (Same as vscode://file/{path}:{L}:{C} — Cursor inherits VS Code's URL handler.)
+// When an `onNavigate` callback is provided the editor is NOT opened;
+// the callback receives the resolved location instead.
+function openInEditor(
+  source: string,
+  line: number,
+  column: number,
+  onNavigate?: ShowComponentProps['onNavigate'],
+  componentName?: string,
+): void {
   let cleanPath = source.replace(/^file:\/\//, '');
   cleanPath = decodeURIComponent(cleanPath);
   const url = `cursor://file${cleanPath}:${line}:${column}`;
-  window.open(url, '_self');
+
+  if (onNavigate) {
+    onNavigate({ source: cleanPath, line, column, url, componentName });
+  } else {
+    // Use location.href for custom protocol URLs — window.open() may fail
+    // to trigger the OS protocol handler in some browsers.  This is the
+    // same approach VS Code's own workbench uses (see BrowserWindow).
+    window.location.href = url;
+  }
 }
 
 function getComponentName(fiber: Fiber): string {
@@ -193,7 +248,8 @@ function getComponentNameFromType(type: unknown): string {
 // 1 = second frame (usually the actual user component)
 const STACK_FRAME_INDEX = 1;
 
-function getSourceUrl(fiber: Fiber): string | undefined {
+/** Extracts the relevant stack-trace frame line from a fiber's debug stack. */
+function getStackFrame(fiber: Fiber): string | undefined {
   const stack = fiber._debugStack?.stack;
   if (!stack) return undefined;
 
@@ -220,31 +276,34 @@ function findFiberElementFromNode(node: Node): Fiber | null {
 }
 
 // Client-side version using frontend source location resolver
-async function resolveSources(request: ClickToComponentRequest) {
+async function resolveSources(
+  request: ClickToComponentRequest,
+  onNavigate?: ShowComponentProps['onNavigate'],
+) {
   try {
     console.log('🔄 Client-side source resolution for request:', request);
 
     const resolvedChain: ResolvedClickToNodeInfo[] = await Promise.all(
       request.chain.map(async (node) => {
-        if (!node.sourceUrl) {
+        if (!node.stackFrame) {
           return {
             ...node,
-            error: 'No source URL available',
+            error: 'No stack frame available',
           };
         }
 
         try {
-          const originalSource = await resolveLocation(node.sourceUrl);
+          const originalSource = await resolveLocation(node.stackFrame);
           return {
             componentName: node.componentName,
-            sourceUrl: node.sourceUrl,
+            stackFrame: node.stackFrame,
             originalSource: originalSource || undefined,
             error: originalSource ? undefined : 'Could not resolve to original source',
           };
         } catch (error) {
           return {
             componentName: node.componentName,
-            sourceUrl: node.sourceUrl,
+            stackFrame: node.stackFrame,
             error: `Error resolving source: ${error instanceof Error ? error.message : 'Unknown error'}`,
           };
         }
@@ -255,8 +314,8 @@ async function resolveSources(request: ClickToComponentRequest) {
 
     // Cache resolved locations for future use (same as server version)
     for (const node of resolvedChain) {
-      if (node.originalSource && node.sourceUrl) {
-        const cacheKey = createCacheKey(node.sourceUrl);
+      if (node.originalSource && node.stackFrame) {
+        const cacheKey = createCacheKey(node.stackFrame);
         if (cacheKey) {
           resolvedLocationCache.set(cacheKey, {
             source: node.originalSource.source,
@@ -274,7 +333,7 @@ async function resolveSources(request: ClickToComponentRequest) {
       if (selectedComponent?.originalSource) {
         const { source, line, column } = selectedComponent.originalSource;
         console.log('🎯 Client-side navigation to:', { source, line, column });
-        openInEditor(source, line, column);
+        openInEditor(source, line, column, onNavigate, selectedComponent.componentName);
         return true; // Indicate successful navigation
       }
       console.error(
@@ -291,7 +350,17 @@ async function resolveSources(request: ClickToComponentRequest) {
   }
 }
 
-export function ShowComponent() {
+export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {}) {
+  // Keep a stable ref so event handlers registered once (in useEffect [])
+  // always see the latest callback without re-registering listeners.
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
+
+  // Sync sourceRoot prop → resolver config
+  useEffect(() => {
+    configureSourceRoot(sourceRoot);
+  }, [sourceRoot]);
+
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [fibersChain, setFibersChain] = useState<ClickToNodeInfo[]>([]);
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
@@ -307,23 +376,33 @@ export function ShowComponent() {
     id: string;
     offset: { x: number; y: number };
   } | null>(null);
+  const [resizingPopup, setResizingPopup] = useState<{
+    id: string;
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    startPosX: number;
+    startPosY: number;
+    direction: string;
+  } | null>(null);
 
   const handleComponentClick = async (index: number) => {
     const selectedComponent = fibersChain[index];
-    if (!selectedComponent.sourceUrl) {
-      console.warn('No source URL available for component:', selectedComponent.componentName);
+    if (!selectedComponent.stackFrame) {
+      console.warn('No stack frame available for component:', selectedComponent.componentName);
       setIsPopoverOpen(false);
       return;
     }
 
     // Check frontend cache first (Hot scenario)
-    const cacheKey = createCacheKey(selectedComponent.sourceUrl);
+    const cacheKey = createCacheKey(selectedComponent.stackFrame);
     if (cacheKey) {
       const cachedLocation = resolvedLocationCache.get(cacheKey);
 
       if (cachedLocation) {
         console.log('🎯 Frontend cache hit - opening directly:', cacheKey); // Try to open directly using protocol
-        openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column);
+        openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column, onNavigateRef.current, selectedComponent.componentName);
         setIsPopoverOpen(false);
       }
     }
@@ -336,8 +415,31 @@ export function ShowComponent() {
       selectedIndex: index,
     };
 
-    await resolveSources(request);
+    await resolveSources(request, onNavigateRef.current);
     setIsPopoverOpen(false);
+  };
+
+  // Navigate to a component's source directly (used from props popup)
+  const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
+    if (!component.stackFrame) return;
+
+    // Check cache first
+    const cacheKey = createCacheKey(component.stackFrame);
+    if (cacheKey) {
+      const cached = resolvedLocationCache.get(cacheKey);
+      if (cached) {
+        openInEditor(cached.source, cached.line, cached.column, onNavigateRef.current, component.componentName);
+        return;
+      }
+    }
+
+    // Cold path — resolve via source maps
+    const request: ClickToComponentRequest = {
+      chain: [component],
+      navigateToChild: true,
+      selectedIndex: 0,
+    };
+    await resolveSources(request, onNavigateRef.current);
   };
 
   const handlePropsClick = (component: ClickToNodeInfo) => {
@@ -416,16 +518,64 @@ export function ShowComponent() {
           )
         );
       }
+      if (resizingPopup) {
+        const MIN_W = 200;
+        const MIN_H = 120;
+        const dx = e.clientX - resizingPopup.startX;
+        const dy = e.clientY - resizingPopup.startY;
+        const dir = resizingPopup.direction;
+        let newW = resizingPopup.startW;
+        let newH = resizingPopup.startH;
+        let newX = resizingPopup.startPosX;
+        let newY = resizingPopup.startPosY;
+
+        if (dir.includes('e')) newW = Math.max(MIN_W, resizingPopup.startW + dx);
+        if (dir.includes('s')) newH = Math.max(MIN_H, resizingPopup.startH + dy);
+        if (dir.includes('w')) {
+          const proposed = resizingPopup.startW - dx;
+          if (proposed >= MIN_W) { newW = proposed; newX = resizingPopup.startPosX + dx; }
+          else { newW = MIN_W; newX = resizingPopup.startPosX + (resizingPopup.startW - MIN_W); }
+        }
+        if (dir.includes('n')) {
+          const proposed = resizingPopup.startH - dy;
+          if (proposed >= MIN_H) { newH = proposed; newY = resizingPopup.startPosY + dy; }
+          else { newH = MIN_H; newY = resizingPopup.startPosY + (resizingPopup.startH - MIN_H); }
+        }
+
+        setPropsPopups((prev) =>
+          prev.map((popup) =>
+            popup.id === resizingPopup.id
+              ? { ...popup, position: { x: newX, y: newY }, size: { width: newW, height: newH } }
+              : popup
+          )
+        );
+      }
     },
-    [draggingPopup]
+    [draggingPopup, resizingPopup]
   );
 
   const handleMouseUp = useCallback(() => {
     setDraggingPopup(null);
+    setResizingPopup(null);
   }, []);
 
   const closePopup = (popupId: string) => {
     setPropsPopups((prev) => prev.filter((p) => p.id !== popupId));
+  };
+
+  const startResize = (popupId: string, direction: string, popup: PropsPopup) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingPopup({
+      id: popupId,
+      direction,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: popup.size.width,
+      startH: popup.size.height,
+      startPosX: popup.position.x,
+      startPosY: popup.position.y,
+    });
   };
 
   useEffect(() => {
@@ -453,7 +603,7 @@ export function ShowComponent() {
 
           chain.push({
             componentName: getComponentName(fiber),
-            sourceUrl: getSourceUrl(fiber),
+            stackFrame: getStackFrame(fiber),
             props,
           });
           fiber = fiber._debugOwner;
@@ -491,7 +641,7 @@ export function ShowComponent() {
 
           chain.push({
             componentName: getComponentName(fiber),
-            sourceUrl: getSourceUrl(fiber),
+            stackFrame: getStackFrame(fiber),
             props,
           });
           fiber = fiber._debugOwner;
@@ -500,15 +650,15 @@ export function ShowComponent() {
         // Navigate directly to the first (top) component in the chain
         if (chain.length > 0) {
           const topComponent = chain[0];
-          if (topComponent.sourceUrl) {
+          if (topComponent.stackFrame) {
             // Check frontend cache first
-            const cacheKey = createCacheKey(topComponent.sourceUrl);
+            const cacheKey = createCacheKey(topComponent.stackFrame);
             if (cacheKey) {
               const cachedLocation = resolvedLocationCache.get(cacheKey);
 
               if (cachedLocation) {
                 console.log('🎯 Frontend cache hit - opening directly:', cacheKey);
-                openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column);
+                openInEditor(cachedLocation.source, cachedLocation.line, cachedLocation.column, onNavigateRef.current, topComponent.componentName);
                 return;
               }
             }
@@ -521,7 +671,7 @@ export function ShowComponent() {
               selectedIndex: 0, // Always navigate to the first (top) component
             };
 
-            resolveSources(request);
+            resolveSources(request, onNavigateRef.current);
           }
         }
 
@@ -536,12 +686,19 @@ export function ShowComponent() {
     };
   }, []);
 
-  // Handle dragging events for multiple popups
+  // Handle dragging / resizing events for multiple popups
   useEffect(() => {
-    if (draggingPopup) {
+    const active = draggingPopup || resizingPopup;
+    if (active) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
-      document.body.style.cursor = 'grabbing';
+      const resizeCursors: Record<string, string> = {
+        n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize',
+        ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize',
+      };
+      document.body.style.cursor = resizingPopup
+        ? (resizeCursors[resizingPopup.direction] || 'nwse-resize')
+        : 'grabbing';
       document.body.style.userSelect = 'none';
     } else {
       document.removeEventListener('mousemove', handleMouseMove);
@@ -556,10 +713,13 @@ export function ShowComponent() {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
-  }, [draggingPopup, handleMouseMove, handleMouseUp]);
+  }, [draggingPopup, resizingPopup, handleMouseMove, handleMouseUp]);
 
   return (
     <>
+      {/* Scoped styles — self-contained, no Tailwind CSS vars needed */}
+      <style dangerouslySetInnerHTML={{ __html: SC_STYLES }} />
+
       <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
         <PopoverTrigger asChild>
           <div
@@ -574,33 +734,45 @@ export function ShowComponent() {
             }}
           />
         </PopoverTrigger>
-        <PopoverContent className="w-80 p-0" align="start">
-          <div className="p-4">
-            <h4 className="font-medium text-sm mb-3">React Component Chain</h4>
-            <div className="space-y-1">
-              {fibersChain.map((component, index) => (
+        <PopoverContent
+          className="w-80 p-0"
+          align="start"
+          style={{
+            backgroundColor: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,.15), 0 4px 10px -4px rgba(0,0,0,.08)',
+            color: '#1f2937',
+          }}
+        >
+          <div style={{ padding: '8px 6px' }}>
+            {fibersChain.map((component, index) => {
+              const hasProps = component.props &&
+                Object.keys(component.props).some((k) => k !== 'children');
+
+              return (
                 <div
                   key={`${component.componentName}-${index}`}
-                  className="flex items-center gap-2"
+                  className="sc-chain-row"
                 >
-                  <Button
-                    variant="ghost"
-                    className="flex-1 justify-start text-left h-auto p-2 font-mono text-xs"
+                  <button
+                    className="sc-chain-item"
                     onClick={() => handleComponentClick(index)}
                   >
-                    <span className="font-medium">{component.componentName}</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 flex-shrink-0"
-                    onClick={() => handlePropsClick(component)}
-                  >
-                    🌳
-                  </Button>
+                    {component.componentName}
+                  </button>
+                  {hasProps && (
+                    <button
+                      className="sc-icon-btn"
+                      onClick={() => handlePropsClick(component)}
+                      title="Inspect props"
+                    >
+                      <Braces size={14} strokeWidth={2} />
+                    </button>
+                  )}
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </PopoverContent>
       </Popover>
@@ -609,37 +781,71 @@ export function ShowComponent() {
       {propsPopups.map((popup, index) => (
         <div
           key={popup.id}
-          className="fixed bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden flex flex-col"
           style={{
-            left: `${popup.position.x}px`,
-            top: `${popup.position.y}px`,
-            width: `${popup.size.width}px`,
-            height: `${popup.size.height}px`,
-            zIndex: 9999 + index, // Higher z-index for later popups
+            position: 'fixed',
+            left: popup.position.x,
+            top: popup.position.y,
+            width: popup.size.width,
+            height: popup.size.height,
+            zIndex: 9999 + index,
+            background: '#fff',
+            border: '1px solid #d1d5db',
+            borderRadius: 8,
+            boxShadow: '0 10px 25px -5px rgba(0,0,0,.15), 0 4px 10px -4px rgba(0,0,0,.08)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column' as const,
+            color: '#1f2937',
           }}
           onMouseDown={handleMouseDown(popup.id)}
         >
-          <div className="drag-handle bg-gray-100 px-3 py-2 border-b cursor-move flex justify-between items-center select-none flex-shrink-0">
-            <span className="font-medium text-sm">Props: {popup.component.componentName}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0"
-              onClick={() => closePopup(popup.id)}
-            >
-              ✕
-            </Button>
-          </div>
+          {/* Title bar */}
           <div
-            className="flex-1 overflow-auto p-3"
+            className="drag-handle"
             style={{
-              overscrollBehavior: 'contain', // Prevent body scroll when reaching end
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '6px 10px',
+              background: '#f3f4f6',
+              borderBottom: '1px solid #e5e7eb',
+              cursor: 'move',
+              userSelect: 'none',
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ fontWeight: 600, fontSize: 13 }}>
+              {popup.component.componentName}
+            </span>
+            <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+              <button
+                className="sc-icon-btn"
+                onClick={() => handleNavigateFromPopup(popup.component)}
+                title="Go to source"
+              >
+                <ExternalLink size={13} strokeWidth={2} />
+              </button>
+              <button
+                className="sc-icon-btn"
+                onClick={() => closePopup(popup.id)}
+                title="Close"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Props content */}
+          <div
+            style={{
+              flex: 1,
+              overflow: 'auto',
+              padding: 10,
+              overscrollBehavior: 'contain',
             }}
             onWheel={(e) => {
-              // Prevent body scroll when scrolling in props popup
-              const element = e.currentTarget;
-              const { scrollTop, scrollHeight, clientHeight } = element;
-
+              const el = e.currentTarget;
+              const { scrollTop, scrollHeight, clientHeight } = el;
               if (
                 (e.deltaY > 0 && scrollTop + clientHeight >= scrollHeight) ||
                 (e.deltaY < 0 && scrollTop <= 0)
@@ -652,20 +858,104 @@ export function ShowComponent() {
             {popup.component.props ? (
               <JsonView
                 value={popup.component.props}
-                style={{
-                  fontSize: '12px',
-                  fontFamily: 'monospace',
-                }}
+                style={{ fontSize: '12px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}
                 collapsed={1}
                 displayDataTypes={false}
                 displayObjectSize={false}
+                shortenTextAfterLength={Math.max(20, Math.floor((popup.size.width - 60) / 7.2))}
               />
             ) : (
-              <div className="text-gray-500 text-sm">No props available</div>
+              <div style={{ color: '#9ca3af', fontSize: 13 }}>No props available</div>
             )}
           </div>
+
+          {/* Edge & corner resize handles */}
+          {(['n','s','e','w','ne','nw','se','sw'] as const).map((dir) => (
+            <div
+              key={dir}
+              className={`sc-resize-edge sc-resize-${dir}`}
+              onMouseDown={startResize(popup.id, dir, popup)}
+            />
+          ))}
         </div>
       ))}
     </>
   );
 }
+
+// ─── Scoped CSS for the popover & popup chrome ──────────────────────────────
+// Injected via <style> so the component is fully self-contained and doesn't
+// depend on Tailwind CSS variables being defined in the consumer's app.
+
+const SC_STYLES = `
+.sc-chain-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sc-chain-item {
+  flex: 1;
+  display: block;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.1s;
+  line-height: 1.4;
+}
+.sc-chain-item:hover {
+  background-color: #f3f4f6;
+}
+.sc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  color: #6b7280;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.1s, color 0.1s;
+}
+.sc-icon-btn:hover {
+  background-color: #e5e7eb;
+  color: #1f2937;
+}
+/* Edge & corner resize handles — invisible hit zones */
+.sc-resize-edge { position: absolute; z-index: 1; }
+.sc-resize-n  { top: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.sc-resize-s  { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.sc-resize-e  { top: 8px; right: 0; bottom: 8px; width: 5px; cursor: ew-resize; }
+.sc-resize-w  { top: 8px; left: 0; bottom: 8px; width: 5px; cursor: ew-resize; }
+.sc-resize-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+.sc-resize-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+.sc-resize-se { bottom: 0; right: 0; width: 14px; height: 14px; cursor: nwse-resize; }
+.sc-resize-sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: nesw-resize; }
+.sc-resize-se::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  background:
+    linear-gradient(135deg, transparent 50%, #94a3b8 50%, #94a3b8 55%, transparent 55%,
+      transparent 65%, #94a3b8 65%, #94a3b8 70%, transparent 70%,
+      transparent 80%, #94a3b8 80%, #94a3b8 85%, transparent 85%);
+  opacity: 0.4;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.sc-resize-se:hover::after {
+  opacity: 0.8;
+}
+`;

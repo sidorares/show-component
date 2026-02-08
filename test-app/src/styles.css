@@ -1,0 +1,388 @@
+/* ─── Global reset & layout ─────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f8f9fa;
+  color: #1a1a2e;
+  line-height: 1.6;
+}
+
+/* ─── Page header ───────────────────────────────────────────────────────── */
+
+.page-header {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 24px 32px;
+  border-bottom: 3px solid #4361ee;
+}
+
+.page-header h1 {
+  margin: 0 0 4px 0;
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+.page-header p {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.8;
+}
+
+.page-header code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.back-link {
+  color: #4cc9f0;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+/* ─── Instructions bar ──────────────────────────────────────────────────── */
+
+.instructions {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  padding: 12px 20px;
+  margin: 16px 32px;
+  font-size: 0.85rem;
+}
+
+.instructions kbd {
+  background: #e9ecef;
+  border: 1px solid #ced4da;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 0.85em;
+}
+
+/* ─── Scenario sections ─────────────────────────────────────────────────── */
+
+.scenario-grid {
+  padding: 16px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.scenario-section {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.scenario-header {
+  background: #e9ecef;
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-bottom: 1px solid #dee2e6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scenario-header .tag {
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: #4361ee;
+  color: #fff;
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.scenario-body {
+  padding: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+/* ─── Test case items ───────────────────────────────────────────────────── */
+
+.test-case {
+  border: 1px dashed #adb5bd;
+  border-radius: 6px;
+  padding: 10px 14px;
+  position: relative;
+  min-width: 180px;
+}
+
+.test-case::before {
+  content: attr(data-sc-test-id);
+  position: absolute;
+  top: -9px;
+  left: 8px;
+  background: #fff;
+  padding: 0 4px;
+  font-size: 0.65rem;
+  font-family: monospace;
+  color: #6c757d;
+}
+
+.test-case-meta {
+  display: block;
+  font-size: 0.65rem;
+  color: #868e96;
+  font-family: monospace;
+  margin-top: 6px;
+  word-break: break-all;
+}
+
+/* ─── Clickable test elements ───────────────────────────────────────────── */
+
+.test-button {
+  padding: 8px 16px;
+  border: 2px solid #4361ee;
+  background: #fff;
+  color: #4361ee;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.test-button:hover {
+  background: #4361ee;
+  color: #fff;
+}
+
+.test-button.secondary {
+  border-color: #7209b7;
+  color: #7209b7;
+}
+
+.test-button.secondary:hover {
+  background: #7209b7;
+  color: #fff;
+}
+
+.test-button.destructive {
+  border-color: #e63946;
+  color: #e63946;
+}
+
+.test-button.destructive:hover {
+  background: #e63946;
+  color: #fff;
+}
+
+.test-input {
+  padding: 8px 12px;
+  border: 2px solid #4361ee;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.test-input:focus {
+  border-color: #7209b7;
+}
+
+.test-card {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 0.85rem;
+}
+
+/* ─── Multi-root layout ─────────────────────────────────────────────────── */
+
+.multi-root-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  padding: 24px 32px;
+}
+
+.root-container {
+  background: #fff;
+  border: 2px solid #dee2e6;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.root-container h2 {
+  margin: 0 0 12px 0;
+  font-size: 1.1rem;
+  color: #495057;
+}
+
+.root-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ─── Test runner ───────────────────────────────────────────────────────── */
+
+.test-runner {
+  margin: 16px 32px;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.test-runner-header {
+  background: #1a1a2e;
+  color: #fff;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.test-runner-header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.run-button {
+  padding: 6px 16px;
+  background: #4361ee;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.run-button:hover {
+  background: #3a56d4;
+}
+
+.run-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.test-runner-summary {
+  padding: 8px 16px;
+  font-size: 0.8rem;
+  background: #f1f3f5;
+  border-bottom: 1px solid #dee2e6;
+  font-family: monospace;
+}
+
+.test-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.test-results-table th {
+  background: #f1f3f5;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 2px solid #dee2e6;
+  white-space: nowrap;
+}
+
+.test-results-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f1f3f5;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.test-results-table tr:hover {
+  background: #f8f9fa;
+}
+
+.match-pass {
+  color: #2d6a4f;
+  font-weight: 600;
+}
+
+.match-fail {
+  color: #e63946;
+  font-weight: 600;
+}
+
+.match-skip {
+  color: #868e96;
+}
+
+/* ─── Ground truth manifest ─────────────────────────────────────────────── */
+
+.manifest {
+  margin: 16px 32px 32px;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.manifest-header {
+  background: #e9ecef;
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.manifest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.manifest-table th {
+  background: #f8f9fa;
+  padding: 6px 10px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.manifest-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid #f1f3f5;
+  font-family: monospace;
+}
+
+/* ─── Deep chain visualization ──────────────────────────────────────────── */
+
+.deep-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.chain-level {
+  padding: 6px 10px;
+  border-left: 3px solid #4361ee;
+  margin-left: 0;
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: #495057;
+}
+
+.chain-level + .chain-level {
+  margin-left: 16px;
+}
