@@ -1,8 +1,25 @@
 # show-component
 
+> Inspired by [react-show-in-atom](https://github.com/sidorares/react-show-in-atom) and [click-to-component](https://github.com/ericclemmons/click-to-component).
+
 Development tool for React apps. Right-click any element to jump straight to the component source code in your editor.
 
 Works by reading React fiber internals and resolving source maps in the browser — no server or build plugin required.
+
+## Background
+
+Tools like [click-to-component](https://github.com/ericclemmons/click-to-component), [react-dev-inspector](https://github.com/zthxxx/react-dev-inspector), and [locatorjs](https://github.com/infi-pc/locatorjs) let you click any React element in the browser to jump to its source in your editor. They all relied on `_debugSource` — a property that React attached to fiber nodes when the codebase was compiled with [`@babel/plugin-transform-react-jsx-source`](https://www.npmjs.com/package/babel-plugin-transform-react-jsx-source).
+
+React 19 [removed `_debugSource`](https://github.com/facebook/react/pull/28265), breaking the entire ecosystem of click-to-source tools ([facebook/react#32574](https://github.com/facebook/react/issues/32574)). The removal was intentional — the Babel transform had limitations: it only worked with JSX, didn't compose with source maps, and was DEV-only.
+
+**show-component** takes a different approach. Instead of relying on a build-time Babel transform, it reads `_debugStack` — the `Error` stack trace that React 19 attaches to every fiber node at render time — and resolves original source locations through your bundler's standard source maps at runtime.
+
+This means:
+- **No build plugin required** — works with any bundler that emits source maps (Vite, webpack, esbuild, etc.)
+- **No Babel JSX transform** — no `@babel/plugin-transform-react-jsx-source` or similar needed
+- **React 19 compatible** — uses the same mechanism React itself now uses for component stacks
+
+This library does not fall back to `_debugSource` and exclusively relies on `_debugStack`. If you are on React 18 or earlier, you are better served by [click-to-component](https://github.com/ericclemmons/click-to-component) or [react-dev-inspector](https://github.com/zthxxx/react-dev-inspector), which are designed around the Babel JSX source transform.
 
 ## Installation
 
