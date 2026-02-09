@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/sidorares/show-component/compare/show-component-v1.1.0...show-component-v1.1.1) (2026-02-09)
+
+
+### Bug Fixes
+
+* format import to single line ([ed1036c](https://github.com/sidorares/show-component/commit/ed1036ccf84557d63207345aaab406cd3fd9a72f))
+
 ## [1.1.0](https://github.com/sidorares/show-component/compare/show-component-v1.0.1...show-component-v1.1.0) (2026-02-08)
 
 
