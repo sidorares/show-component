@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/sidorares/show-component/compare/show-component-v1.1.1...show-component-v1.2.0) (2026-02-09)
+
+
+### Features
+
+* add `editorScheme` prop for configurable editor protocol ([1e4e24a](https://github.com/sidorares/show-component/commit/1e4e24a2aea5a8168a5b4860dad6961a5a46e361))
+* add `getClickTarget` prop for customising Alt+Click navigation target ([0c65b47](https://github.com/sidorares/show-component/commit/0c65b475a3ae99b016fc8da71a5d55f192a36387))
+
 ## [1.1.1](https://github.com/sidorares/show-component/compare/show-component-v1.1.0...show-component-v1.1.1) (2026-02-09)
 
 
