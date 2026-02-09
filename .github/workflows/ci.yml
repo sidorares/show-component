@@ -31,3 +31,47 @@ jobs:
 
     - name: Build project
       run: npm run build
+
+  test-harness:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install root dependencies
+      run: npm ci
+
+    - name: Install test-app dependencies
+      run: npm ci
+      working-directory: test-app
+
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+      working-directory: test-app
+
+    - name: Run test harness
+      run: npx playwright test
+      working-directory: test-app
+
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: test-app/playwright-report/
+        retention-days: 7
+
+    - name: Upload test traces
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: playwright-traces
+        path: test-app/test-results/
+        retention-days: 7

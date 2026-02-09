@@ -16,10 +16,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run build:cjs && npm run build:esm && npm run build:types",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:cjs && npm run build:esm",
     "build:cjs": "tsc",
-    "build:esm": "tsc --module es2015 --outDir dist/esm",
-    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "build:esm": "tsc --module es2015 --declaration false --outDir dist/esm",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "type-check": "tsc --noEmit",
@@ -43,7 +43,8 @@
   },
   "homepage": "https://github.com/sidorares/show-component#readme",
   "peerDependencies": {
-    "react": ">=16.8.0"
+    "react": ">=16.8.0",
+    "react-dom": ">=16.8.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
@@ -55,9 +56,6 @@
     "@jridgewell/source-map": "^0.3.11",
     "@radix-ui/react-popover": "^1.1.15",
     "@uiw/react-json-view": "^2.0.0-alpha.37",
-    "clsx": "^2.1.1",
-    "convert-source-map": "^2.0.0",
-    "lucide-react": "^0.544.0",
-    "tailwind-merge": "^3.3.1"
+    "convert-source-map": "^2.0.0"
   }
 }

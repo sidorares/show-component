@@ -1,9 +1,49 @@
 import JsonView from '@uiw/react-json-view';
-import { Braces, ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import { configureSourceRoot, resolveLocation } from './lib/source-location-resolver';
+
+/* ── Inline SVG icons (replaces lucide-react to avoid 43 MB dependency) ── */
+
+function BracesIcon({ size = 24, strokeWidth = 2 }: { size?: number; strokeWidth?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" />
+      <path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" />
+    </svg>
+  );
+}
+
+function ExternalLinkIcon({ size = 24, strokeWidth = 2 }: { size?: number; strokeWidth?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </svg>
+  );
+}
 
 type Fiber = {
   type: string | ((...args: unknown[]) => unknown) | Record<string, unknown>;
@@ -550,7 +590,7 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
                       onClick={() => handlePropsClick(component)}
                       title="Inspect props"
                     >
-                      <Braces size={14} strokeWidth={2} />
+                      <BracesIcon size={14} strokeWidth={2} />
                     </button>
                   )}
                 </div>
@@ -603,7 +643,7 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
                 onClick={() => handleNavigateFromPopup(popup.component)}
                 title="Go to source"
               >
-                <ExternalLink size={13} strokeWidth={2} />
+                <ExternalLinkIcon size={13} strokeWidth={2} />
               </button>
               <button
                 type="button"
