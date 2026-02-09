@@ -66,6 +66,42 @@ Override the default editor-opening behavior with `onNavigate`:
 
 When `onNavigate` is provided, the `cursor://` protocol handler is not triggered.
 
+## Custom Click Target
+
+By default, **Alt + Right Click** navigates to the component closest to the clicked DOM element (index 0 in the chain). Use `getClickTarget` to choose a different component:
+
+```tsx
+<ShowComponent
+  getClickTarget={(chain) => {
+    // Skip design-system primitives, navigate to the first "real" component
+    const skip = new Set(['Button', 'Icon', 'Text', 'Box']);
+    const idx = chain.findIndex((c) => !skip.has(c.componentName));
+    return idx >= 0 ? idx : undefined; // undefined = default (index 0)
+  }}
+/>
+```
+
+Each entry in the chain is a `ComponentHandle` with the component name and props available immediately. Source-map resolution is **lazy** — it only happens if you call `resolveSource()`:
+
+```tsx
+<ShowComponent
+  getClickTarget={async (chain) => {
+    // Prefer deciding by name alone (zero overhead)
+    const byName = chain.findIndex((c) => c.componentName === 'PageContent');
+    if (byName >= 0) return byName;
+
+    // Fall back to resolving source locations when names aren't enough
+    for (const handle of chain) {
+      const loc = await handle.resolveSource();
+      if (loc && !loc.source.includes('node_modules')) return handle.index;
+    }
+    return undefined;
+  }}
+/>
+```
+
+The callback can return synchronously (just a number) or asynchronously (a Promise). Returning `null` or `undefined` falls back to the default behaviour.
+
 ## API
 
 ### `<ShowComponent />`
@@ -74,6 +110,7 @@ When `onNavigate` is provided, the `cursor://` protocol handler is not triggered
 |---|---|---|
 | `sourceRoot` | `string` | Absolute path to the project root. Converts URL-relative paths to absolute filesystem paths. |
 | `onNavigate` | `(event: NavigationEvent) => void` | Custom navigation handler. Replaces the default `cursor://` protocol call. |
+| `getClickTarget` | `(chain: ComponentHandle[]) => number \| null \| undefined \| Promise<…>` | Customise which component Alt+Right-Click navigates to. See [Custom Click Target](#custom-click-target). |
 
 ### `configureSourceRoot(root: string | undefined)`
 
@@ -88,6 +125,23 @@ interface NavigationEvent {
   column: number;       // Column number in the original source
   url: string;          // The cursor:// URL
   componentName?: string;
+}
+```
+
+### `ComponentHandle`
+
+Passed to `getClickTarget`. Immediate data is available synchronously; source resolution is lazy.
+
+```ts
+interface ComponentHandle {
+  componentName: string;                    // Display name of the component
+  props: Record<string, unknown> | undefined; // Component props (from fiber)
+  index: number;                            // Position in the chain (0 = closest to DOM)
+  resolveSource: () => Promise<{            // Lazy source-map resolution (cached)
+    source: string;
+    line: number;
+    column: number;
+  } | null>;
 }
 ```
 

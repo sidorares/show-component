@@ -3,4 +3,4 @@ export {
   configureSourceRoot,
   clearCaches,
 } from './lib/source-location-resolver';
-export type { NavigationEvent, ShowComponentProps } from './ShowComponent';
+export type { ComponentHandle, NavigationEvent, ShowComponentProps } from './ShowComponent';

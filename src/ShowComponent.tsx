@@ -59,6 +59,21 @@ type ClickToNodeInfo = {
   props: Record<string, unknown> | undefined;
 };
 
+export interface ComponentHandle {
+  /** Display name of the component. */
+  componentName: string;
+  /** Props of the component (from React fiber internals). */
+  props: Record<string, unknown> | undefined;
+  /** Position in the chain (0 = closest to the clicked DOM element). */
+  index: number;
+  /**
+   * Lazily resolve the original source location via source maps.
+   * The result is cached — subsequent calls return instantly.
+   * Only performs work (network fetch + source-map parse) when called.
+   */
+  resolveSource: () => Promise<{ source: string; line: number; column: number } | null>;
+}
+
 export interface NavigationEvent {
   /** Resolved (original) source file path */
   source: string;
@@ -89,6 +104,24 @@ export interface ShowComponentProps {
    * Can also be set globally via `window.__SHOW_COMPONENT_SOURCE_ROOT__`.
    */
   sourceRoot?: string;
+
+  /**
+   * Customise which component is navigated to on Alt + Right-Click.
+   *
+   * Receives the full component chain (closest-to-DOM-first) as an array
+   * of {@link ComponentHandle} objects.  Each handle exposes the component
+   * name and props immediately, plus a lazy `resolveSource()` that only
+   * performs source-map resolution when called.
+   *
+   * Return a chain index to navigate to, or `null` / `undefined` to use
+   * the default behaviour (index 0 — the closest component).
+   *
+   * May return synchronously (when only names/props are needed) or
+   * asynchronously (when source resolution is required).
+   */
+  getClickTarget?: (
+    chain: ComponentHandle[]
+  ) => number | null | undefined | Promise<number | null | undefined>;
 }
 
 /**
@@ -266,11 +299,14 @@ async function resolveAndNavigate(
   }
 }
 
-export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {}) {
-  // Keep a stable ref so event handlers registered once (in useEffect [])
-  // always see the latest callback without re-registering listeners.
+export function ShowComponent({ onNavigate, sourceRoot, getClickTarget }: ShowComponentProps = {}) {
+  // Keep stable refs so event handlers registered once (in useEffect [])
+  // always see the latest callbacks without re-registering listeners.
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+
+  const getClickTargetRef = useRef(getClickTarget);
+  getClickTargetRef.current = getClickTarget;
 
   useEffect(() => {
     configureSourceRoot(sourceRoot);
@@ -494,8 +530,35 @@ export function ShowComponent({ onNavigate, sourceRoot }: ShowComponentProps = {
         return;
       }
 
-      // Alt+RightClick: navigate directly to the top component
-      resolveAndNavigate(chain[0], onNavigateRef.current);
+      // Alt+RightClick: navigate to click target
+      const clickTargetCb = getClickTargetRef.current;
+
+      if (clickTargetCb) {
+        // Build lightweight handles — resolveSource() closures are cheap to
+        // create and only trigger real work (fetch + source-map parse) when
+        // the consumer actually calls them.
+        const handles: ComponentHandle[] = chain.map((c, i) => ({
+          componentName: c.componentName,
+          props: c.props,
+          index: i,
+          resolveSource: () =>
+            c.stackFrame
+              ? resolveLocation(c.stackFrame).then((r) =>
+                  r ? { source: r.source, line: r.line, column: r.column } : null
+                )
+              : Promise.resolve(null),
+        }));
+
+        // Support both sync and async return values.
+        Promise.resolve(clickTargetCb(handles)).then((targetIndex) => {
+          const idx = targetIndex ?? 0;
+          if (idx >= 0 && idx < chain.length) {
+            resolveAndNavigate(chain[idx], onNavigateRef.current);
+          }
+        });
+      } else {
+        resolveAndNavigate(chain[0], onNavigateRef.current);
+      }
     };
 
     // Capture phase so we intercept before the default context menu
