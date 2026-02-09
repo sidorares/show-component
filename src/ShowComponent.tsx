@@ -3,10 +3,7 @@ import { Braces, ExternalLink } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
-import {
-  configureSourceRoot,
-  resolveLocation,
-} from './lib/source-location-resolver';
+import { configureSourceRoot, resolveLocation } from './lib/source-location-resolver';
 
 type Fiber = {
   type: string | ((...args: unknown[]) => unknown) | Record<string, unknown>;
