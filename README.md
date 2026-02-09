@@ -34,7 +34,7 @@ function App() {
 | **Alt + Right Click** | Navigate directly to the source of the clicked component |
 | **Alt + Shift + Right Click** | Show a popover with the full component chain; click any entry to navigate, or inspect its props |
 
-Navigation opens the file in Cursor/VS Code via the `cursor://file/…` protocol.
+Navigation opens the file in your editor via a custom protocol URL (default `cursor://file/…`). Use the [`editorScheme`](#editor-scheme) prop to target a different editor.
 
 ## Source Root
 
@@ -52,6 +52,23 @@ import { configureSourceRoot } from 'show-component';
 configureSourceRoot('/Users/me/project');
 ```
 
+## Editor Scheme
+
+By default, navigation uses the `cursor://` protocol. To open files in a different editor, pass the `editorScheme` prop with the appropriate URL scheme:
+
+```tsx
+// VS Code
+<ShowComponent editorScheme="vscode" />
+
+// VS Code Insiders
+<ShowComponent editorScheme="vscode-insiders" />
+
+// Windsurf
+<ShowComponent editorScheme="windsurf" />
+```
+
+The scheme is the part before `://` in the generated URL (e.g. `vscode://file/path/to/File.tsx:12:5`).
+
 ## Custom Navigation
 
 Override the default editor-opening behavior with `onNavigate`:
@@ -64,7 +81,7 @@ Override the default editor-opening behavior with `onNavigate`:
 />
 ```
 
-When `onNavigate` is provided, the `cursor://` protocol handler is not triggered.
+When `onNavigate` is provided, the protocol handler is not triggered — the consumer decides what to do with the resolved location.
 
 ## Custom Click Target
 
@@ -106,11 +123,12 @@ The callback can return synchronously (just a number) or asynchronously (a Promi
 
 ### `<ShowComponent />`
 
-| Prop | Type | Description |
-|---|---|---|
-| `sourceRoot` | `string` | Absolute path to the project root. Converts URL-relative paths to absolute filesystem paths. |
-| `onNavigate` | `(event: NavigationEvent) => void` | Custom navigation handler. Replaces the default `cursor://` protocol call. |
-| `getClickTarget` | `(chain: ComponentHandle[]) => number \| null \| undefined \| Promise<…>` | Customise which component Alt+Right-Click navigates to. See [Custom Click Target](#custom-click-target). |
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `sourceRoot` | `string` | — | Absolute path to the project root. Converts URL-relative paths to absolute filesystem paths. |
+| `editorScheme` | `string` | `"cursor"` | URL scheme for editor navigation (e.g. `"vscode"`, `"vscode-insiders"`, `"windsurf"`). See [Editor Scheme](#editor-scheme). |
+| `onNavigate` | `(event: NavigationEvent) => void` | — | Custom navigation handler. Replaces the default protocol call. |
+| `getClickTarget` | `(chain: ComponentHandle[]) => number \| null \| undefined \| Promise<…>` | — | Customise which component Alt+Right-Click navigates to. See [Custom Click Target](#custom-click-target). |
 
 ### `configureSourceRoot(root: string | undefined)`
 
@@ -123,7 +141,7 @@ interface NavigationEvent {
   source: string;       // Resolved source file path
   line: number;         // Line number in the original source
   column: number;       // Column number in the original source
-  url: string;          // The cursor:// URL
+  url: string;          // The editor protocol URL (e.g. cursor://file/…)
   componentName?: string;
 }
 ```

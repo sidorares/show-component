@@ -81,7 +81,7 @@ export interface NavigationEvent {
   line: number;
   /** Column number in the original source */
   column: number;
-  /** The cursor:// URL that would have been opened */
+  /** The editor protocol URL that would have been opened (e.g. cursor://file/…) */
   url: string;
   /** The component name that was navigated to, when available */
   componentName?: string;
@@ -106,6 +106,19 @@ export interface ShowComponentProps {
   sourceRoot?: string;
 
   /**
+   * URL scheme used for editor navigation (the part before `://`).
+   *
+   * Common values: `"cursor"`, `"vscode"`, `"vscode-insiders"`, `"windsurf"`.
+   *
+   * @default "cursor"
+   *
+   * @example
+   * // Open files in VS Code instead of Cursor
+   * <ShowComponent editorScheme="vscode" />
+   */
+  editorScheme?: string;
+
+  /**
    * Customise which component is navigated to on Alt + Right-Click.
    *
    * Receives the full component chain (closest-to-DOM-first) as an array
@@ -125,7 +138,7 @@ export interface ShowComponentProps {
 }
 
 /**
- * Opens a file in the editor via the cursor:// protocol (cursor://file/{path}:{L}:{C}).
+ * Opens a file in the editor via a custom protocol (e.g. cursor://file/{path}:{L}:{C}).
  * When `onNavigate` is provided, the callback receives the resolved location
  * instead of triggering the protocol handler.
  */
@@ -134,11 +147,12 @@ function openInEditor(
   line: number,
   column: number,
   onNavigate?: ShowComponentProps['onNavigate'],
-  componentName?: string
+  componentName?: string,
+  editorScheme = 'cursor'
 ): void {
   let cleanPath = source.replace(/^file:\/\//, '');
   cleanPath = decodeURIComponent(cleanPath);
-  const url = `cursor://file${cleanPath}:${line}:${column}`;
+  const url = `${editorScheme}://file${cleanPath}:${line}:${column}`;
 
   if (onNavigate) {
     onNavigate({ source: cleanPath, line, column, url, componentName });
@@ -277,7 +291,8 @@ function findFiberElementFromNode(node: Node): Fiber | null {
  */
 async function resolveAndNavigate(
   component: ClickToNodeInfo,
-  onNavigate?: ShowComponentProps['onNavigate']
+  onNavigate?: ShowComponentProps['onNavigate'],
+  editorScheme?: string
 ): Promise<boolean> {
   if (!component.stackFrame) return false;
 
@@ -289,7 +304,8 @@ async function resolveAndNavigate(
         resolved.line,
         resolved.column,
         onNavigate,
-        component.componentName
+        component.componentName,
+        editorScheme
       );
       return true;
     }
@@ -299,11 +315,19 @@ async function resolveAndNavigate(
   }
 }
 
-export function ShowComponent({ onNavigate, sourceRoot, getClickTarget }: ShowComponentProps = {}) {
+export function ShowComponent({
+  onNavigate,
+  sourceRoot,
+  editorScheme,
+  getClickTarget,
+}: ShowComponentProps = {}) {
   // Keep stable refs so event handlers registered once (in useEffect [])
   // always see the latest callbacks without re-registering listeners.
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+
+  const editorSchemeRef = useRef(editorScheme);
+  editorSchemeRef.current = editorScheme;
 
   const getClickTargetRef = useRef(getClickTarget);
   getClickTargetRef.current = getClickTarget;
@@ -340,11 +364,11 @@ export function ShowComponent({ onNavigate, sourceRoot, getClickTarget }: ShowCo
 
   const handleComponentClick = async (index: number) => {
     setIsPopoverOpen(false);
-    await resolveAndNavigate(fibersChain[index], onNavigateRef.current);
+    await resolveAndNavigate(fibersChain[index], onNavigateRef.current, editorSchemeRef.current);
   };
 
   const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
-    await resolveAndNavigate(component, onNavigateRef.current);
+    await resolveAndNavigate(component, onNavigateRef.current, editorSchemeRef.current);
   };
 
   const handlePropsClick = (component: ClickToNodeInfo) => {
@@ -553,11 +577,11 @@ export function ShowComponent({ onNavigate, sourceRoot, getClickTarget }: ShowCo
         Promise.resolve(clickTargetCb(handles)).then((targetIndex) => {
           const idx = targetIndex ?? 0;
           if (idx >= 0 && idx < chain.length) {
-            resolveAndNavigate(chain[idx], onNavigateRef.current);
+            resolveAndNavigate(chain[idx], onNavigateRef.current, editorSchemeRef.current);
           }
         });
       } else {
-        resolveAndNavigate(chain[0], onNavigateRef.current);
+        resolveAndNavigate(chain[0], onNavigateRef.current, editorSchemeRef.current);
       }
     };
 
