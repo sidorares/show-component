@@ -173,13 +173,32 @@ export function extractStackFrameInfo(stackLine: string): StackFrameInfo | null 
 }
 
 /**
- * Converts an RSC (React Server Component) URL to a fetchable HTTP URL.
+ * Matches React Server Component debug URLs.
  *
+ * React / Next.js emits stack frames with special schemes that embed a
+ * `file:///` filesystem path.  Known variants:
+ *   - `rsc://React/Server/file:///…`   (React Flight / older Turbopack)
+ *   - `about://React/Server/file:///…` (newer Turbopack builds)
+ *
+ * This pattern captures everything after the `file://` portion.
+ */
+const REACT_SERVER_URL_RE = /^(?:rsc|about):\/\/React\/Server\/file:\/\/(.+?)(\?.*)?$/;
+
+/** Returns `true` when the URL uses a known React Server Component debug scheme. */
+function isReactServerUrl(url: string): boolean {
+  return url.startsWith('rsc://React/Server/') || url.startsWith('about://React/Server/');
+}
+
+/**
+ * Converts an RSC (React Server Component) debug URL to a fetchable HTTP URL.
+ *
+ * Supports both `rsc://` and `about://` scheme variants:
  *   rsc://React/Server/file:///…/.next/server/chunks/ssr/file.js?v=1
+ *   about://React/Server/file:///…/.next/server/chunks/ssr/file.js?v=1
  *   → {origin}/api/dev/source-file/server/chunks/ssr/file.js
  */
 function convertRscUrlToHttp(rscUrl: string): string {
-  const match = rscUrl.match(/^rsc:\/\/React\/Server\/file:\/\/(.+?)(\?.*)?$/);
+  const match = rscUrl.match(REACT_SERVER_URL_RE);
   if (!match) {
     throw new Error(`Invalid RSC URL format: ${rscUrl}`);
   }
@@ -194,13 +213,33 @@ function convertRscUrlToHttp(rscUrl: string): string {
   return `${window.location.origin}/api/dev/source-file/${relativePath}`;
 }
 
+/**
+ * Returns `true` when the URL uses a scheme that we cannot fetch
+ * (e.g. `chrome-extension://`, `blob:`, `data:`, `about:` that is
+ * *not* a React Server URL, etc.).
+ *
+ * Allows: `http(s)://`, relative URLs (no scheme), and React Server URLs.
+ */
+function hasNonFetchableScheme(url: string): boolean {
+  if (isReactServerUrl(url)) return false;
+  // Relative URLs and http(s) are fine
+  if (url.startsWith('/') || url.startsWith('http://') || url.startsWith('https://')) return false;
+  // Anything else with a "scheme://" prefix is non-fetchable
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url);
+}
+
 /** Fetches a source file, handling RSC and regular HTTP/relative URLs. */
 export async function fetchSourceFile(
   url: string
 ): Promise<{ content: string; effectiveUrl: string }> {
+  // Reject URLs with schemes we cannot fetch (chrome-extension://, blob:, etc.)
+  if (hasNonFetchableScheme(url)) {
+    throw new Error(`Non-fetchable URL scheme: ${url}`);
+  }
+
   let fetchUrl: string;
 
-  if (url.startsWith('rsc://React/Server/')) {
+  if (isReactServerUrl(url)) {
     fetchUrl = convertRscUrlToHttp(url);
   } else {
     fetchUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
@@ -381,8 +420,8 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
     let sourceMapData = sourceMapCache.get(url);
     let effectiveUrl = url;
 
-    // RSC URLs may be cached under their converted HTTP URL
-    if (!sourceMapData && url.startsWith('rsc://React/Server/')) {
+    // RSC URLs (rsc:// or about://) may be cached under their converted HTTP URL
+    if (!sourceMapData && isReactServerUrl(url)) {
       effectiveUrl = convertRscUrlToHttp(url);
       sourceMapData = sourceMapCache.get(effectiveUrl);
     }
@@ -447,3 +486,12 @@ export function clearCaches(): void {
   resultCache.clear();
   sourceMapCache.clear();
 }
+
+
+// 
+// 
+// http://localhost:3000/_next/static/chunks/%5Bturbopack%5D_browser_dev_hmr-client_hmr-client_ts_774bbf31._.js
+// http://localhost:3000/_next/static/chunks/2374f_next_dist_compiled_20dc070b._.js
+// http://localhost:3000/_next/static/chunks/2374f_next_dist_compiled_20dc070b._.js
+
+// http://localhost:3000about://React/Server/file:///Users/laplace/Projects/joboffer.fit/web/.next/server/chunks/ssr/%5Broot-of-the-server%5D__63dfaf64._.js?20
