@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/sidorares/show-component/compare/show-component-v2.0.0...show-component-v2.0.1) (2026-02-10)
+
+
+### Bug Fixes
+
+* apply lint/format fixes and add vitest config ([9258308](https://github.com/sidorares/show-component/commit/9258308452a2095314c7884de3a5774eb0f6e6ae))
+
 ## [2.0.0](https://github.com/sidorares/show-component/compare/show-component-v1.2.0...show-component-v2.0.0) (2026-02-10)
 
 
