@@ -646,9 +646,10 @@ export function ShowComponent({
           />
         </PopoverTrigger>
         <PopoverContent
-          className="w-80 p-0"
           align="start"
           style={{
+            width: '20rem',
+            padding: 0,
             backgroundColor: '#fff',
             border: '1px solid #e5e7eb',
             borderRadius: 8,
