@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0](https://github.com/sidorares/show-component/compare/show-component-v1.2.0...show-component-v2.0.0) (2026-02-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* PopoverContent no longer applies default Tailwind classes. Consumers who relied on overriding those classes via the `className` prop should use the `style` prop instead.
+
+### Bug Fixes
+
+* handle `about://React/Server/` URLs in stack frames ([05d7eb3](https://github.com/sidorares/show-component/commit/05d7eb3f40b5e2d99a77fd0eb9b691fe54efce1b))
+
+
+### Code Refactoring
+
+* remove Tailwind CSS dependency from popover component ([b7d0ae9](https://github.com/sidorares/show-component/commit/b7d0ae94585f13b101e1e55d4db062c12b4b90f4))
+
 ## [1.2.0](https://github.com/sidorares/show-component/compare/show-component-v1.1.1...show-component-v1.2.0) (2026-02-09)
 
 
