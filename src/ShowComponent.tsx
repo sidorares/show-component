@@ -585,9 +585,20 @@ export function ShowComponent({
       }
     };
 
+    // Prevent right-click mousedown from selecting text when Alt is held.
+    // The mousedown fires before contextmenu, so we must intercept it here
+    // to avoid side-effects like accidental text selection.
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button === 2 && event.altKey) {
+        event.preventDefault();
+      }
+    };
+
     // Capture phase so we intercept before the default context menu
+    document.addEventListener('mousedown', handleMouseDown, true);
     document.addEventListener('contextmenu', handleContextMenu, true);
     return () => {
+      document.removeEventListener('mousedown', handleMouseDown, true);
       document.removeEventListener('contextmenu', handleContextMenu, true);
     };
   }, []);
