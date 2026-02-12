@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/sidorares/show-component/compare/show-component-v2.1.1...show-component-v2.1.2) (2026-02-12)
+
+
+### Bug Fixes
+
+* handle file:// protocol in source map source paths ([a55a343](https://github.com/sidorares/show-component/commit/a55a343d7bcfe2ce240309d89ec95011d06a3259))
+
 ## [2.1.1](https://github.com/sidorares/show-component/compare/show-component-v2.1.0...show-component-v2.1.1) (2026-02-12)
 
 
