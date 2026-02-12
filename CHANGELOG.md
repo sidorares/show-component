@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/sidorares/show-component/compare/show-component-v2.1.2...show-component-v2.2.0) (2026-02-12)
+
+
+### Features
+
+* resolve Next.js RSC stack frames via built-in dev server endpoints ([677fb39](https://github.com/sidorares/show-component/commit/677fb3996c276c10beec6444c8a763e60caf2ce0))
+
 ## [2.1.2](https://github.com/sidorares/show-component/compare/show-component-v2.1.1...show-component-v2.1.2) (2026-02-12)
 
 
