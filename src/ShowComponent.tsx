@@ -135,6 +135,17 @@ export interface ShowComponentProps {
   getClickTarget?: (
     chain: ComponentHandle[]
   ) => number | null | undefined | Promise<number | null | undefined>;
+
+  /**
+   * When `true`, logs a detailed debug trace for every source-map
+   * resolution step, the resolved result, and the final editor URL to
+   * the browser console.
+   *
+   * Useful for diagnosing why a click isn't opening the right file.
+   *
+   * @default false
+   */
+  debug?: boolean;
 }
 
 /**
@@ -148,11 +159,23 @@ function openInEditor(
   column: number,
   onNavigate?: ShowComponentProps['onNavigate'],
   componentName?: string,
-  editorScheme = 'cursor'
+  editorScheme = 'cursor',
+  debug?: boolean
 ): void {
   let cleanPath = source.replace(/^file:\/\//, '');
   cleanPath = decodeURIComponent(cleanPath);
   const url = `${editorScheme}://file${cleanPath}:${line}:${column}`;
+
+  if (debug) {
+    console.log('[show-component] openInEditor:', {
+      source: cleanPath,
+      line,
+      column,
+      componentName,
+      url,
+      mode: onNavigate ? 'onNavigate callback' : 'location.href',
+    });
+  }
 
   if (onNavigate) {
     onNavigate({ source: cleanPath, line, column, url, componentName });
@@ -292,12 +315,13 @@ function findFiberElementFromNode(node: Node): Fiber | null {
 async function resolveAndNavigate(
   component: ClickToNodeInfo,
   onNavigate?: ShowComponentProps['onNavigate'],
-  editorScheme?: string
+  editorScheme?: string,
+  debug?: boolean
 ): Promise<boolean> {
   if (!component.stackFrame) return false;
 
   try {
-    const resolved = await resolveLocation(component.stackFrame);
+    const resolved = await resolveLocation(component.stackFrame, debug);
     if (resolved) {
       openInEditor(
         resolved.source,
@@ -305,7 +329,8 @@ async function resolveAndNavigate(
         resolved.column,
         onNavigate,
         component.componentName,
-        editorScheme
+        editorScheme,
+        debug
       );
       return true;
     }
@@ -320,6 +345,7 @@ export function ShowComponent({
   sourceRoot,
   editorScheme,
   getClickTarget,
+  debug,
 }: ShowComponentProps = {}) {
   // Keep stable refs so event handlers registered once (in useEffect [])
   // always see the latest callbacks without re-registering listeners.
@@ -331,6 +357,9 @@ export function ShowComponent({
 
   const getClickTargetRef = useRef(getClickTarget);
   getClickTargetRef.current = getClickTarget;
+
+  const debugRef = useRef(debug);
+  debugRef.current = debug;
 
   useEffect(() => {
     configureSourceRoot(sourceRoot);
@@ -364,11 +393,21 @@ export function ShowComponent({
 
   const handleComponentClick = async (index: number) => {
     setIsPopoverOpen(false);
-    await resolveAndNavigate(fibersChain[index], onNavigateRef.current, editorSchemeRef.current);
+    await resolveAndNavigate(
+      fibersChain[index],
+      onNavigateRef.current,
+      editorSchemeRef.current,
+      debugRef.current
+    );
   };
 
   const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
-    await resolveAndNavigate(component, onNavigateRef.current, editorSchemeRef.current);
+    await resolveAndNavigate(
+      component,
+      onNavigateRef.current,
+      editorSchemeRef.current,
+      debugRef.current
+    );
   };
 
   const handlePropsClick = (component: ClickToNodeInfo) => {
@@ -561,13 +600,14 @@ export function ShowComponent({
         // Build lightweight handles — resolveSource() closures are cheap to
         // create and only trigger real work (fetch + source-map parse) when
         // the consumer actually calls them.
+        const dbg = debugRef.current;
         const handles: ComponentHandle[] = chain.map((c, i) => ({
           componentName: c.componentName,
           props: c.props,
           index: i,
           resolveSource: () =>
             c.stackFrame
-              ? resolveLocation(c.stackFrame).then((r) =>
+              ? resolveLocation(c.stackFrame, dbg).then((r) =>
                   r ? { source: r.source, line: r.line, column: r.column } : null
                 )
               : Promise.resolve(null),
@@ -577,11 +617,21 @@ export function ShowComponent({
         Promise.resolve(clickTargetCb(handles)).then((targetIndex) => {
           const idx = targetIndex ?? 0;
           if (idx >= 0 && idx < chain.length) {
-            resolveAndNavigate(chain[idx], onNavigateRef.current, editorSchemeRef.current);
+            resolveAndNavigate(
+              chain[idx],
+              onNavigateRef.current,
+              editorSchemeRef.current,
+              debugRef.current
+            );
           }
         });
       } else {
-        resolveAndNavigate(chain[0], onNavigateRef.current, editorSchemeRef.current);
+        resolveAndNavigate(
+          chain[0],
+          onNavigateRef.current,
+          editorSchemeRef.current,
+          debugRef.current
+        );
       }
     };
 

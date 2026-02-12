@@ -399,13 +399,28 @@ export async function getOriginalSourceContent(
  * Resolves a stack trace line to original source location using source maps.
  * Two-level cache: L1 caches the final resolved result, L2 caches the parsed
  * source map so multiple positions in the same file are fast.
+ *
+ * When `debug` is `true`, detailed logs are printed to the console showing
+ * each step of the resolution pipeline.
  */
-export async function resolveLocation(stackLine: string): Promise<ResolvedSourceInfo | null> {
+export async function resolveLocation(
+  stackLine: string,
+  debug?: boolean
+): Promise<ResolvedSourceInfo | null> {
   try {
+    if (debug) console.group('[show-component] resolveLocation');
+    if (debug) console.log('Stack line:', stackLine);
+
     const frameInfo = extractStackFrameInfo(stackLine);
     if (!frameInfo) {
+      if (debug) {
+        console.warn('Could not extract frame info from stack line');
+        console.groupEnd();
+      }
       return null;
     }
+
+    if (debug) console.log('Extracted frame:', frameInfo);
 
     const { url, line, column } = frameInfo;
     const cacheKey = `${url}:${line}:${column}`;
@@ -413,8 +428,13 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
     // L1: exact result cache
     const cachedResult = resultCache.get(cacheKey);
     if (cachedResult) {
+      if (debug) {
+        console.log('L1 cache hit:', cachedResult.originalSource);
+        console.groupEnd();
+      }
       return cachedResult.originalSource;
     }
+    if (debug) console.log('L1 cache miss');
 
     // L2: source map cache (keyed by URL)
     let sourceMapData = sourceMapCache.get(url);
@@ -424,19 +444,30 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
     if (!sourceMapData && isReactServerUrl(url)) {
       effectiveUrl = convertRscUrlToHttp(url);
       sourceMapData = sourceMapCache.get(effectiveUrl);
+      if (debug) console.log('RSC URL detected, converted to:', effectiveUrl);
     }
 
     if (!sourceMapData) {
+      if (debug) console.log('L2 cache miss — fetching source file:', url);
+
       const sourceResult = await fetchSourceFile(url);
       effectiveUrl = sourceResult.effectiveUrl;
+
+      if (debug) console.log('Fetched source, effective URL:', effectiveUrl);
 
       const sourceMapContent = await resolveSourceMap(
         sourceResult.content,
         sourceResult.effectiveUrl
       );
       if (!sourceMapContent) {
+        if (debug) {
+          console.warn('No source map found for:', effectiveUrl);
+          console.groupEnd();
+        }
         return null;
       }
+
+      if (debug) console.log('Source map resolved (length:', sourceMapContent.length, ')');
 
       sourceMapData = {
         sourceContent: sourceResult.content,
@@ -446,15 +477,32 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
       if (url !== effectiveUrl) {
         boundedSet(sourceMapCache, effectiveUrl, sourceMapData, MAX_SOURCE_MAP_CACHE_SIZE);
       }
+    } else {
+      if (debug) console.log('L2 cache hit for:', url);
     }
 
     const mapResult = await mapToOriginalSource(frameInfo, sourceMapData.sourceMapContent);
     if (!mapResult) {
+      if (debug) {
+        console.warn('Source map lookup returned no result for position', { line, column });
+        console.groupEnd();
+      }
       return null;
     }
 
+    if (debug) console.log('Mapped to original:', mapResult.info);
+
     const rawSource = mapResult.info.source;
     const resolvedSource = resolveSourcePath(rawSource, mapResult.sourceRoot, effectiveUrl);
+
+    if (debug) {
+      console.log('Source path resolution:', {
+        rawSource,
+        sourceRoot: mapResult.sourceRoot,
+        effectiveUrl,
+        resolvedSource,
+      });
+    }
 
     const originalInfo: OriginalSourceInfo = {
       ...mapResult.info,
@@ -474,8 +522,23 @@ export async function resolveLocation(stackLine: string): Promise<ResolvedSource
 
     boundedSet(resultCache, cacheKey, { originalSource: result }, MAX_RESULT_CACHE_SIZE);
 
+    if (debug) {
+      console.log('Resolved result:', {
+        source: result.source,
+        line: result.line,
+        column: result.column,
+        name: result.name,
+        hasSourceContent: !!result.sourceContent,
+      });
+      console.groupEnd();
+    }
+
     return result;
   } catch (error) {
+    if (debug) {
+      console.error('Resolution failed:', error);
+      console.groupEnd();
+    }
     console.error('Error resolving stack frame to original source:', error);
     return null;
   }
