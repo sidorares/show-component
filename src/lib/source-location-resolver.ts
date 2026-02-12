@@ -258,20 +258,23 @@ export async function fetchSourceFile(
  * Returns `"inline"` for data-URL source maps, the external URL string
  * for `//# sourceMappingURL=…` comments, or `null` when absent.
  *
- * convert-source-map handles inline maps; for external maps we scan the
- * last 10 lines manually because the library doesn't expose the raw URL.
+ * convert-source-map handles inline (data-URL) maps; for external maps
+ * we scan the last 10 lines manually because the library doesn't expose
+ * the raw URL.
  */
 function extractSourceMapUrl(sourceContent: string): string | null {
+  // 1. Check for inline (data-URL) source maps first
   const converter = convertSourceMap.fromSource(sourceContent);
-  if (!converter) {
-    return null;
+  if (converter) {
+    const sourceMapObj = converter.toObject();
+    if (sourceMapObj && Object.keys(sourceMapObj).length > 0) {
+      return 'inline';
+    }
   }
 
-  const sourceMapObj = converter.toObject();
-  if (sourceMapObj && Object.keys(sourceMapObj).length > 0) {
-    return 'inline';
-  }
-
+  // 2. Fall through to external //# sourceMappingURL=… scan.
+  //    This is the common case for Turbopack / webpack / esbuild
+  //    production builds that emit a separate .map file.
   const lines = sourceContent.split('\n');
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 10); i--) {
     const match = lines[i].trim().match(/^\/\/[@#]\s*sourceMappingURL=(.+)$/);
