@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/sidorares/show-component/compare/show-component-v2.0.3...show-component-v2.1.0) (2026-02-12)
+
+
+### Features
+
+* add `debug` prop for detailed source resolution logging ([cf6c30f](https://github.com/sidorares/show-component/commit/cf6c30f87081747dc6dbf4e1e41e84ec72414136))
+
 ## [2.0.3](https://github.com/sidorares/show-component/compare/show-component-v2.0.2...show-component-v2.0.3) (2026-02-12)
 
 
