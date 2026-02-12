@@ -202,60 +202,203 @@ function isReactServerUrl(url: string): boolean {
 }
 
 /**
- * Converts an RSC (React Server Component) debug URL to a fetchable HTTP URL.
+ * Returns `true` when the URL is a Next.js-specific RSC URL.
  *
- * Supports both `rsc://` and `about://` scheme variants:
- *   rsc://React/Server/file:///…/.next/server/chunks/ssr/file.js?v=1
- *   about://React/Server/file:///…/.next/server/chunks/ssr/file.js?v=1
- *   → {origin}/api/dev/source-file/server/chunks/ssr/file.js
+ * Next.js RSC URLs contain `/.next/` in the path (the build output directory),
+ * which distinguishes them from RSC URLs potentially produced by other frameworks.
  */
-function convertRscUrlToHttp(rscUrl: string): string {
+function isNextjsRscUrl(url: string): boolean {
+  return isReactServerUrl(url) && url.includes('/.next/');
+}
+
+/**
+ * Extracts the absolute filesystem path from an RSC debug URL.
+ * URL-decodes the path to handle percent-encoded characters (e.g. %5B → [).
+ *
+ * Example:
+ *   about://React/Server/file:///Users/me/proj/.next/server/chunks/ssr/%5Broot%5D__abc._.js?20
+ *   → /Users/me/proj/.next/server/chunks/ssr/[root]__abc._.js
+ */
+function extractFilePathFromRscUrl(rscUrl: string): string | null {
   const match = rscUrl.match(REACT_SERVER_URL_RE);
-  if (!match) {
-    throw new Error(`Invalid RSC URL format: ${rscUrl}`);
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+// ─── Next.js Dev Server integration ─────────────────────────────────────────
+// Next.js dev server exposes built-in endpoints for source-map resolution:
+//   POST /__nextjs_original-stack-frames  — full server-side stack frame resolution
+//   GET  /__nextjs_source-map?filename=…  — raw source map for a given file
+//
+// These leverage the bundler's in-memory compilation state (Webpack / Turbopack)
+// and are more reliable than fetching compiled JS to extract source maps client-side.
+
+/** Next.js StackFrame shape expected by `__nextjs_original-stack-frames`. */
+interface NextStackFrame {
+  file: string | null;
+  methodName: string;
+  arguments: string[];
+  line1: number | null;
+  column1: number | null;
+}
+
+interface NextOriginalStackFrameResponse {
+  originalStackFrame: (NextStackFrame & { ignored: boolean }) | null;
+  originalCodeFrame: string | null;
+}
+
+type NextOriginalStackFramesResponse = Array<
+  | { status: 'fulfilled'; value: NextOriginalStackFrameResponse }
+  | { status: 'rejected'; reason: string }
+>;
+
+/**
+ * Tracks whether the Next.js dev server's stack-frame endpoint is available.
+ * `undefined` = not yet probed, `true` = available, `false` = not available.
+ */
+let _nextDevServerAvailable: boolean | undefined;
+
+/**
+ * Resolves a React Server Component stack frame via the Next.js dev server's
+ * built-in `POST /__nextjs_original-stack-frames` endpoint.
+ *
+ * This performs source map resolution server-side with full access to the
+ * bundler's compilation state, which is more reliable than client-side
+ * resolution for server-rendered files whose compiled JS isn't directly
+ * fetchable via HTTP.
+ */
+async function resolveViaNextDevServer(
+  frameInfo: StackFrameInfo,
+  debug?: boolean
+): Promise<ResolvedSourceInfo | null> {
+  if (_nextDevServerAvailable === false) {
+    if (debug) console.log('Next.js dev server endpoint previously unavailable, skipping');
+    return null;
   }
 
-  const filePath = match[1];
-  const nextIndex = filePath.indexOf('/.next/');
-  if (nextIndex === -1) {
-    throw new Error(`RSC URL does not contain .next folder: ${rscUrl}`);
-  }
+  const filePath = extractFilePathFromRscUrl(frameInfo.url);
+  if (!filePath) return null;
 
-  const relativePath = filePath.substring(nextIndex + 7); // skip '/.next/'
-  return `${window.location.origin}/api/dev/source-file/${relativePath}`;
+  try {
+    const response = await fetch(`${window.location.origin}/__nextjs_original-stack-frames`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frames: [
+          {
+            file: filePath,
+            methodName: frameInfo.functionName || '<unknown>',
+            arguments: [],
+            line1: frameInfo.line,
+            column1: frameInfo.column,
+          },
+        ],
+        isServer: true,
+        isEdgeServer: false,
+        isAppDirectory: true,
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        _nextDevServerAvailable = false;
+        if (debug) console.log('Next.js __nextjs_original-stack-frames not found (404), disabling');
+      }
+      return null;
+    }
+
+    _nextDevServerAvailable = true;
+
+    const results: NextOriginalStackFramesResponse = await response.json();
+    if (!results.length) return null;
+
+    const first = results[0];
+    if (first.status !== 'fulfilled' || !first.value.originalStackFrame) {
+      if (debug)
+        console.log(
+          'Next.js stack frame resolution rejected:',
+          first.status === 'rejected' ? first.reason : 'no original frame'
+        );
+      return null;
+    }
+
+    const { originalStackFrame } = first.value;
+    return {
+      source: originalStackFrame.file || frameInfo.url,
+      line: originalStackFrame.line1 ?? frameInfo.line,
+      column: originalStackFrame.column1 ?? frameInfo.column,
+      name: originalStackFrame.methodName || undefined,
+    };
+  } catch (error) {
+    if (debug) console.warn('Next.js dev server resolution failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Fetches a raw source map from the Next.js dev server's
+ * `GET /__nextjs_source-map?filename=…` endpoint.
+ *
+ * Returns the source map JSON string, or `null` if unavailable.
+ */
+async function fetchSourceMapFromNextDevServer(
+  filePath: string,
+  debug?: boolean
+): Promise<string | null> {
+  try {
+    const url = `${window.location.origin}/__nextjs_source-map?filename=${encodeURIComponent(filePath)}`;
+    if (debug) console.log('Fetching source map from Next.js dev server:', url);
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (debug) console.log('__nextjs_source-map returned:', response.status);
+      return null;
+    }
+
+    return await response.text();
+  } catch (error) {
+    if (debug) console.warn('Failed to fetch source map from Next.js dev server:', error);
+    return null;
+  }
 }
 
 /**
  * Returns `true` when the URL uses a scheme that we cannot fetch
- * (e.g. `chrome-extension://`, `blob:`, `data:`, `about:` that is
- * *not* a React Server URL, etc.).
+ * (e.g. `chrome-extension://`, `blob:`, `data:`, `rsc://`, `about://`, etc.).
  *
- * Allows: `http(s)://`, relative URLs (no scheme), and React Server URLs.
+ * Allows: `http(s)://` and relative URLs (no scheme).
+ *
+ * Note: React Server Component URLs (`rsc://`, `about://React/Server/…`) are
+ * handled by the Next.js dev server fast path in {@link resolveLocation} and
+ * are intentionally *not* fetchable through this path.
  */
 function hasNonFetchableScheme(url: string): boolean {
-  if (isReactServerUrl(url)) return false;
   // Relative URLs and http(s) are fine
   if (url.startsWith('/') || url.startsWith('http://') || url.startsWith('https://')) return false;
   // Anything else with a "scheme://" prefix is non-fetchable
   return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url);
 }
 
-/** Fetches a source file, handling RSC and regular HTTP/relative URLs. */
+/**
+ * Fetches a source file over HTTP.
+ *
+ * Accepts absolute `http(s)://` URLs and root-relative paths (resolved against
+ * `window.location.origin`).  Non-HTTP schemes (including RSC debug URLs) are
+ * rejected — RSC resolution is handled by the Next.js fast path in
+ * {@link resolveLocation}.
+ */
 export async function fetchSourceFile(
   url: string
 ): Promise<{ content: string; effectiveUrl: string }> {
-  // Reject URLs with schemes we cannot fetch (chrome-extension://, blob:, etc.)
   if (hasNonFetchableScheme(url)) {
     throw new Error(`Non-fetchable URL scheme: ${url}`);
   }
 
-  let fetchUrl: string;
-
-  if (isReactServerUrl(url)) {
-    fetchUrl = convertRscUrlToHttp(url);
-  } else {
-    fetchUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
-  }
+  const fetchUrl = url.startsWith('http') ? url : `${window.location.origin}${url}`;
 
   const response = await fetch(fetchUrl);
   if (!response.ok) {
@@ -451,16 +594,70 @@ export async function resolveLocation(
     }
     if (debug) console.log('L1 cache miss');
 
+    // ── Next.js RSC fast path ──────────────────────────────────────────────
+    // For React Server Component URLs in Next.js, delegate resolution to the
+    // built-in dev server endpoints which resolve source maps server-side
+    // with full access to the bundler's compilation state.  This removes the
+    // need for a custom /api/dev/source-file/ handler.
+    if (isNextjsRscUrl(url)) {
+      if (debug) console.log('Next.js RSC URL detected, trying built-in dev server endpoints');
+
+      // Strategy 1: POST /__nextjs_original-stack-frames (full server-side resolution)
+      const nextResult = await resolveViaNextDevServer(frameInfo, debug);
+      if (nextResult) {
+        boundedSet(resultCache, cacheKey, { originalSource: nextResult }, MAX_RESULT_CACHE_SIZE);
+        if (debug) {
+          console.log('Resolved via Next.js __nextjs_original-stack-frames:', nextResult);
+          console.groupEnd();
+        }
+        return nextResult;
+      }
+
+      // Strategy 2: GET /__nextjs_source-map (fetch source map, resolve client-side)
+      const filePath = extractFilePathFromRscUrl(url);
+      if (filePath) {
+        const sourceMapContent = await fetchSourceMapFromNextDevServer(filePath, debug);
+        if (sourceMapContent) {
+          if (debug) console.log('Got source map via __nextjs_source-map, resolving client-side');
+
+          const mapResult = await mapToOriginalSource(frameInfo, sourceMapContent);
+          if (mapResult) {
+            const resolvedSource = resolveSourcePath(
+              mapResult.info.source,
+              mapResult.sourceRoot,
+              url
+            );
+            const originalSourceContent = await getOriginalSourceContent(
+              mapResult.info,
+              sourceMapContent
+            );
+            const result: ResolvedSourceInfo = {
+              ...mapResult.info,
+              source: resolvedSource,
+              sourceContent: originalSourceContent || undefined,
+            };
+            boundedSet(resultCache, cacheKey, { originalSource: result }, MAX_RESULT_CACHE_SIZE);
+            if (debug) {
+              console.log('Resolved via Next.js __nextjs_source-map:', result);
+              console.groupEnd();
+            }
+            return result;
+          }
+        }
+      }
+
+      if (debug) {
+        console.warn('All Next.js resolution methods failed for RSC URL:', url);
+        console.groupEnd();
+      }
+      return null;
+    }
+
+    // ── Standard path (Vite, webpack, non-RSC HTTP URLs) ─────────────────
+
     // L2: source map cache (keyed by URL)
     let sourceMapData = sourceMapCache.get(url);
     let effectiveUrl = url;
-
-    // RSC URLs (rsc:// or about://) may be cached under their converted HTTP URL
-    if (!sourceMapData && isReactServerUrl(url)) {
-      effectiveUrl = convertRscUrlToHttp(url);
-      sourceMapData = sourceMapCache.get(effectiveUrl);
-      if (debug) console.log('RSC URL detected, converted to:', effectiveUrl);
-    }
 
     if (!sourceMapData) {
       if (debug) console.log('L2 cache miss — fetching source file:', url);
@@ -559,16 +756,9 @@ export async function resolveLocation(
   }
 }
 
-/** Clears all caches. */
+/** Clears all caches (including the Next.js dev server availability flag). */
 export function clearCaches(): void {
   resultCache.clear();
   sourceMapCache.clear();
+  _nextDevServerAvailable = undefined;
 }
-
-//
-//
-// http://localhost:3000/_next/static/chunks/%5Bturbopack%5D_browser_dev_hmr-client_hmr-client_ts_774bbf31._.js
-// http://localhost:3000/_next/static/chunks/2374f_next_dist_compiled_20dc070b._.js
-// http://localhost:3000/_next/static/chunks/2374f_next_dist_compiled_20dc070b._.js
-
-// http://localhost:3000about://React/Server/file:///Users/laplace/Projects/joboffer.fit/web/.next/server/chunks/ssr/%5Broot-of-the-server%5D__63dfaf64._.js?20
