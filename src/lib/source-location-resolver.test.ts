@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearCaches, extractStackFrameInfo, fetchSourceFile } from './source-location-resolver';
+import {
+  clearCaches,
+  configureSourceRoot,
+  extractStackFrameInfo,
+  fetchSourceFile,
+  resolveSourcePath,
+} from './source-location-resolver';
 
 // ─── extractStackFrameInfo ───────────────────────────────────────────────────
 
@@ -139,5 +145,60 @@ describe('fetchSourceFile', () => {
     const url = 'chrome-extension://abcdef/background.js';
 
     await expect(fetchSourceFile(url)).rejects.toThrow(/non-fetchable URL scheme/i);
+  });
+});
+
+// ─── resolveSourcePath ──────────────────────────────────────────────────────
+
+describe('resolveSourcePath', () => {
+  afterEach(() => {
+    configureSourceRoot(undefined);
+  });
+
+  it('strips file:/// protocol and returns the absolute path directly', () => {
+    const result = resolveSourcePath(
+      'file:///Users/me/project/src/components/Foo.tsx',
+      undefined,
+      'http://localhost:3000/_next/static/chunks/app_src_abc123._.js'
+    );
+    expect(result).toBe('/Users/me/project/src/components/Foo.tsx');
+  });
+
+  it('does not double-prefix file:/// sources with sourceRoot', () => {
+    configureSourceRoot('/Users/me/project');
+    const result = resolveSourcePath(
+      'file:///Users/me/project/src/components/Foo.tsx',
+      undefined,
+      'http://localhost:3000/_next/static/chunks/app_src_abc123._.js'
+    );
+    // Should return the path as-is from the file:// URL, not prepend sourceRoot
+    expect(result).toBe('/Users/me/project/src/components/Foo.tsx');
+  });
+
+  it('resolves relative sources against the source file URL', () => {
+    const result = resolveSourcePath(
+      'Foo.tsx',
+      undefined,
+      'http://localhost:5200/src/scenarios/Foo.tsx'
+    );
+    expect(result).toBe('/src/scenarios/Foo.tsx');
+  });
+
+  it('handles absolute paths starting with / that contain /src/', () => {
+    const result = resolveSourcePath(
+      '/Users/me/project/src/components/Foo.tsx',
+      undefined,
+      'http://localhost:3000/app.js'
+    );
+    expect(result).toBe('/Users/me/project/src/components/Foo.tsx');
+  });
+
+  it('strips webpack:/// prefix', () => {
+    const result = resolveSourcePath(
+      'webpack:///src/components/Foo.tsx',
+      undefined,
+      'http://localhost:3000/app.js'
+    );
+    expect(result).toBe('/src/components/Foo.tsx');
   });
 });

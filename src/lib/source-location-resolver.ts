@@ -88,11 +88,23 @@ function getSourceRoot(): string | undefined {
  * If a filesystem sourceRoot is configured:
  *   → "/Users/me/project/src/scenarios/DeepChain.tsx"
  */
-function resolveSourcePath(
+/** @internal — exported for testing */
+export function resolveSourcePath(
   rawSource: string,
   sourceMapSourceRoot: string | undefined,
   sourceFileUrl: string
 ): string {
+  // Strip file:// protocol — Turbopack emits sources like
+  // "file:///Users/me/project/src/Foo.tsx" which are already absolute
+  // filesystem paths once the scheme is removed.
+  if (rawSource.startsWith('file://')) {
+    const stripped = rawSource.replace(/^file:\/\//, '');
+    // After removing "file://" we have "/Users/me/project/…" (absolute)
+    if (stripped.startsWith('/')) {
+      return stripped;
+    }
+  }
+
   // Already an absolute filesystem path — nothing to do
   if (rawSource.startsWith('/') && !rawSource.startsWith('//')) {
     const fsRoot = getSourceRoot();
