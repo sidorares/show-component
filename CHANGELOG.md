@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3](https://github.com/sidorares/show-component/compare/show-component-v2.0.2...show-component-v2.0.3) (2026-02-12)
+
+
+### Bug Fixes
+
+* prevent text selection on Alt+right-click ([685435d](https://github.com/sidorares/show-component/commit/685435d6d5f9496ae245452e1e487b44859f9e7f))
+
 ## [2.0.2](https://github.com/sidorares/show-component/compare/show-component-v2.0.1...show-component-v2.0.2) (2026-02-10)
 
 
