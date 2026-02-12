@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/sidorares/show-component/compare/show-component-v2.1.0...show-component-v2.1.1) (2026-02-12)
+
+
+### Bug Fixes
+
+* support external source maps in extractSourceMapUrl ([28025d8](https://github.com/sidorares/show-component/commit/28025d8783978124f0440e22014b25ce61328c5a))
+
 ## [2.1.0](https://github.com/sidorares/show-component/compare/show-component-v2.0.3...show-component-v2.1.0) (2026-02-12)
 
 
