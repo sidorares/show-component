@@ -164,7 +164,19 @@ function openInEditor(
 ): void {
   let cleanPath = source.replace(/^file:\/\//, '');
   cleanPath = decodeURIComponent(cleanPath);
-  const url = `${editorScheme}://file${cleanPath}:${line}:${column}`;
+  // Ensure the path starts with / so the protocol URL is well-formed
+  // (e.g. cursor://file/… not cursor://filesrc/…)
+  if (!cleanPath.startsWith('/')) {
+    cleanPath = `/${cleanPath}`;
+  }
+  // Encode each path segment so special characters (parentheses, brackets,
+  // spaces, #, etc.) produce a well-formed protocol URL while preserving
+  // the '/' separators.
+  const encodedPath = cleanPath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  const url = `${editorScheme}://file${encodedPath}:${line}:${column}`;
 
   if (debug) {
     console.log('[show-component] openInEditor:', {
@@ -702,7 +714,7 @@ export function ShowComponent({
               width: 1,
               height: 1,
               pointerEvents: 'none',
-              zIndex: 9999,
+              zIndex: 2147483647,
             }}
           />
         </PopoverTrigger>
@@ -716,6 +728,7 @@ export function ShowComponent({
             borderRadius: 8,
             boxShadow: '0 10px 25px -5px rgba(0,0,0,.15), 0 4px 10px -4px rgba(0,0,0,.08)',
             color: '#1f2937',
+            zIndex: 2147483647,
           }}
         >
           <div style={{ padding: '8px 6px' }}>
@@ -749,7 +762,7 @@ export function ShowComponent({
         </PopoverContent>
       </Popover>
 
-      {propsPopups.map((popup, index) => (
+      {propsPopups.map((popup) => (
         <div
           key={popup.id}
           style={{
@@ -758,7 +771,7 @@ export function ShowComponent({
             top: popup.position.y,
             width: popup.size.width,
             height: popup.size.height,
-            zIndex: 9999 + index,
+            zIndex: 2147483647,
             background: '#fff',
             border: '1px solid #d1d5db',
             borderRadius: 8,

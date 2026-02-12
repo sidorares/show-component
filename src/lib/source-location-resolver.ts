@@ -327,8 +327,33 @@ async function resolveViaNextDevServer(
     }
 
     const { originalStackFrame } = first.value;
+    let sourcePath = originalStackFrame.file || frameInfo.url;
+
+    // Next.js returns project-relative paths (e.g. "src/app/page.tsx").
+    // Convert to absolute using the configured source root so the editor
+    // can open the file directly.
+    if (
+      sourcePath &&
+      !sourcePath.startsWith('/') &&
+      !sourcePath.startsWith('file://') &&
+      !sourcePath.includes('://')
+    ) {
+      const fsRoot = getSourceRoot();
+      if (debug) {
+        console.log('Source path is relative, resolving with sourceRoot:', {
+          sourcePath,
+          fsRoot,
+        });
+      }
+      if (fsRoot) {
+        sourcePath = `${fsRoot}/${sourcePath}`;
+      }
+    }
+
+    if (debug) console.log('Final resolved source path:', sourcePath);
+
     return {
-      source: originalStackFrame.file || frameInfo.url,
+      source: sourcePath,
       line: originalStackFrame.line1 ?? frameInfo.line,
       column: originalStackFrame.column1 ?? frameInfo.column,
       name: originalStackFrame.methodName || undefined,
