@@ -56,6 +56,8 @@ type ClickToNodeInfo = {
   componentName: string;
   /** Raw stack-trace frame line, e.g. "at LevelD (http://…:18:26)" */
   stackFrame: string | undefined;
+  /** The React fiber node — useful for debugging stack resolution issues. */
+  fiber: Fiber;
   props: Record<string, unknown> | undefined;
 };
 
@@ -295,6 +297,36 @@ function getComponentNameFromType(type: unknown): string {
 // 0 = first non-internal frame (usually jsxDEV), 1 = the actual user component.
 const STACK_FRAME_INDEX = 1;
 
+/**
+ * Returns `true` for stack-frame lines that can never resolve to user code
+ * and should be excluded when looking for the "real" component frame.
+ */
+function isUnresolvableFrame(line: string): boolean {
+  // React internals shipped with the framework runtime
+  if (
+    line.includes('react-dom') ||
+    line.includes('scheduler') ||
+    line.includes('react-server-dom')
+  )
+    return true;
+
+  // React debug-stack sentinels & helpers
+  if (
+    line.includes('fakeJSXCallSite') ||
+    line.includes('react-stack-top-frame') ||
+    line.includes('react_stack_bottom_frame') ||
+    line.includes('initializeElement') ||
+    line.includes('initializeFakeStack') ||
+    line.includes('createFakeJSXCallStack')
+  )
+    return true;
+
+  // Native built-ins (e.g. Promise.all) that have no source-mappable URL
+  if (line.includes('<anonymous>')) return true;
+
+  return false;
+}
+
 /** Extracts the relevant stack-trace frame from a fiber's `_debugStack`. */
 function getStackFrame(fiber: Fiber): string | undefined {
   const stack = fiber._debugStack?.stack;
@@ -304,12 +336,12 @@ function getStackFrame(fiber: Fiber): string | undefined {
   const meaningfulLines: string[] = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (line && !line.includes('react-dom') && !line.includes('scheduler')) {
+    if (line && !isUnresolvableFrame(line)) {
       meaningfulLines.push(line);
     }
   }
 
-  return meaningfulLines[STACK_FRAME_INDEX] || meaningfulLines[0] || lines[1]?.trim();
+  return meaningfulLines[STACK_FRAME_INDEX] || meaningfulLines[0] || undefined;
 }
 
 /** Reads the React fiber attached to a DOM node via the internal `__reactFiber$…` property. */
@@ -581,6 +613,7 @@ export function ShowComponent({
         chain.push({
           componentName: getComponentName(fiber),
           stackFrame: getStackFrame(fiber),
+          fiber,
           props,
         });
         fiber = fiber._debugOwner;

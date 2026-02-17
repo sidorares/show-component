@@ -1,10 +1,17 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: {
+    index: 'src/index.ts',
+    // Second entry so ESM code-splitting places the dev-only component
+    // (and its transitive deps) in a separate chunk that the consumer's
+    // bundler can drop entirely in production.
+    ShowComponent: 'src/ShowComponent.tsx',
+  },
   format: ['cjs', 'esm'],
   dts: true,
-  splitting: false,
+  // Enables chunk-level code-splitting for ESM (CJS ignores this).
+  splitting: true,
   sourcemap: true,
   clean: true,
   target: 'es2015',
