@@ -303,11 +303,7 @@ const STACK_FRAME_INDEX = 1;
  */
 function isUnresolvableFrame(line: string): boolean {
   // React internals shipped with the framework runtime
-  if (
-    line.includes('react-dom') ||
-    line.includes('scheduler') ||
-    line.includes('react-server-dom')
-  )
+  if (line.includes('react-dom') || line.includes('scheduler') || line.includes('react-server-dom'))
     return true;
 
   // React debug-stack sentinels & helpers
