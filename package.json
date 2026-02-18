@@ -1,6 +1,6 @@
 {
   "name": "show-component",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Quickly navigate to the line of code that is responsible for rendering a component",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
