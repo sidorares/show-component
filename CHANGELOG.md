@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/sidorares/show-component/compare/show-component-v2.2.0...show-component-v2.2.1) (2026-02-18)
+
+
+### Bug Fixes
+
+* resolve absolute paths and encode special chars in editor URLs ([3c62f8b](https://github.com/sidorares/show-component/commit/3c62f8b84ba7b3c95a1f00dfaa0606f19caf4c98))
+
 ## [2.2.0](https://github.com/sidorares/show-component/compare/show-component-v2.1.2...show-component-v2.2.0) (2026-02-12)
 
 
