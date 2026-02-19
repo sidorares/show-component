@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { resolveLocation } from 'show-component/lib/source-location-resolver';
+import { resolveLocation } from 'show-component/core/source-location-resolver';
 import type { NavigationEvent } from 'show-component';
 import {
   findFiberFromNode,
