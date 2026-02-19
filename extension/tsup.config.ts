@@ -1,5 +1,9 @@
 import { defineConfig } from 'tsup';
 
+const define = {
+  'process.env.NODE_ENV': JSON.stringify('production'),
+};
+
 export default defineConfig([
   {
     entry: {
@@ -14,6 +18,7 @@ export default defineConfig([
     target: 'chrome120',
     noExternal: [/.*/],
     outDir: 'dist',
+    define,
     esbuildOptions(options) {
       options.alias = { '@core': '../src/core' };
     },
@@ -31,5 +36,6 @@ export default defineConfig([
     jsx: 'automatic',
     noExternal: [/.*/],
     outDir: 'dist',
+    define,
   },
 ]);
