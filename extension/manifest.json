@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Show Component",
+  "version": "1.0.0",
+  "description": "Navigate to the source code of any React component. Right-click any element to jump to the exact line that renders it.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/main-world.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Show Component"
+  },
+  "options_page": "options/index.html"
+}
