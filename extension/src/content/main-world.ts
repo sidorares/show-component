@@ -294,10 +294,22 @@ function openPropsPopup(entry: ClickToNodeInfo, shadow: ShadowRoot): void {
 
   const srcBtn = document.createElement('button');
   srcBtn.className = 'sc-ext-icon-btn';
-  srcBtn.title = 'Go to source';
+  srcBtn.title = 'Resolving source…';
   srcBtn.innerHTML = ICON_EXTERNAL_LINK;
   srcBtn.addEventListener('click', () => navigateToComponent(entry));
   headerBtns.appendChild(srcBtn);
+
+  if (entry.stackFrame) {
+    resolveLocation(entry.stackFrame, debug).then((resolved) => {
+      if (resolved) {
+        srcBtn.title = `${resolved.source}:${resolved.line}:${resolved.column}`;
+      } else {
+        srcBtn.title = 'Could not resolve source';
+      }
+    });
+  } else {
+    srcBtn.title = 'No stack frame available';
+  }
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'sc-ext-icon-btn';
