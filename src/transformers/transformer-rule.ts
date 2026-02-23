@@ -56,6 +56,32 @@ export const TRANSFORMER_PRESETS: Record<string, TransformerRule> = {
   },
 };
 
+// ─── Name matching helpers ────────────────────────────────────────────────────
+
+const WRAPPER_RE = /^(?:Memo|ForwardRef)\((.+)\)$/;
+
+/**
+ * Strips React wrapper prefixes (`Memo(...)`, `ForwardRef(...)`) to recover
+ * the base component name as it appears in JSX source code.
+ */
+function unwrapComponentName(name: string): string {
+  let n = name;
+  for (;;) {
+    const m = WRAPPER_RE.exec(n);
+    if (!m) return n;
+    n = m[1];
+  }
+}
+
+/**
+ * Returns `true` when `actualName` refers to the same component as
+ * `targetName`, ignoring `Memo(…)` / `ForwardRef(…)` wrappers on either side.
+ */
+function componentNameMatches(actualName: string, targetName: string): boolean {
+  if (actualName === targetName) return true;
+  return unwrapComponentName(actualName) === unwrapComponentName(targetName);
+}
+
 // ─── Generic rule-based engine ───────────────────────────────────────────────
 
 function buildLabel(value: unknown, rule: TransformerRule): string {
@@ -82,11 +108,12 @@ function buildResolveLocation(
     if (!resolved) return null;
 
     if (resolved.sourceContent) {
+      const jsxName = unwrapComponentName(rule.componentName);
       const propLoc = findJsxPropValueLocation(
         resolved.sourceContent,
         resolved.line,
         resolved.column,
-        rule.componentName,
+        jsxName,
         rule.navigateToProp
       );
       if (propLoc) {
@@ -111,7 +138,7 @@ function matchChildFiber(
 
   const matched = findChildFiber(
     entry.fiber,
-    (f: Fiber) => ctx.getComponentName(f) === rule.componentName,
+    (f: Fiber) => componentNameMatches(ctx.getComponentName(f), rule.componentName),
     rule.maxSearchDepth ?? 3
   );
   if (!matched) return null;
@@ -146,7 +173,7 @@ function matchDirect(
   rule: TransformerRule,
   ctx: ChainTransformContext
 ): TransformedEntry | null {
-  if (entry.componentName !== rule.componentName) return null;
+  if (!componentNameMatches(entry.componentName, rule.componentName)) return null;
 
   const props = entry.props;
   const labelValue = props?.[rule.labelProp];
