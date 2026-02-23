@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { TRANSFORMER_PRESETS } from '../../../src/transformers/transformer-rule';
+import type { TransformerRule } from '../../../src/transformers/transformer-rule';
 import {
   DEFAULT_OPTIONS,
   type ExtensionOptions,
@@ -138,6 +140,19 @@ function OptionsApp() {
         </label>
       </Section>
 
+      {/* Transformers */}
+      <Section
+        label="Transformers"
+        hint="Automatically transform component chains to show more useful labels and navigate to specific prop values."
+      >
+        <TransformersConfig
+          enabledTransformers={opts.enabledTransformers}
+          customRules={opts.customTransformerRules}
+          onChangeEnabled={(ids) => update('enabledTransformers', ids)}
+          onChangeCustom={(rules) => update('customTransformerRules', rules)}
+        />
+      </Section>
+
       {/* Enabled Origins */}
       <Section
         label="Enabled Origins"
@@ -170,6 +185,214 @@ function OptionsApp() {
           Save Options
         </button>
         {saved && <span style={{ color: '#16a34a', fontSize: 13 }}>Saved</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Transformers config ──────────────────────────────────────────────────────
+
+const EMPTY_CUSTOM_RULE: Omit<TransformerRule, 'id'> = {
+  name: '',
+  componentName: '',
+  labelProp: '',
+  navigateToProp: '',
+  matchStrategy: 'childFiber',
+};
+
+function TransformersConfig({
+  enabledTransformers,
+  customRules,
+  onChangeEnabled,
+  onChangeCustom,
+}: {
+  enabledTransformers: string[];
+  customRules: TransformerRule[];
+  onChangeEnabled: (ids: string[]) => void;
+  onChangeCustom: (rules: TransformerRule[]) => void;
+}) {
+  const [draft, setDraft] = useState<Omit<TransformerRule, 'id'>>(EMPTY_CUSTOM_RULE);
+
+  const togglePreset = (id: string) => {
+    onChangeEnabled(
+      enabledTransformers.includes(id)
+        ? enabledTransformers.filter((t) => t !== id)
+        : [...enabledTransformers, id]
+    );
+  };
+
+  const addCustomRule = () => {
+    if (!draft.componentName.trim() || !draft.labelProp.trim()) return;
+    const rule: TransformerRule = {
+      ...draft,
+      id: `custom-${Date.now()}`,
+      name: draft.name || `${draft.componentName} → ${draft.labelProp}`,
+      navigateToProp: draft.navigateToProp || draft.labelProp,
+    };
+    onChangeCustom([...customRules, rule]);
+    setDraft(EMPTY_CUSTOM_RULE);
+  };
+
+  const removeCustomRule = (id: string) => {
+    onChangeCustom(customRules.filter((r) => r.id !== id));
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Presets */}
+      <div>
+        <span style={{ ...styles.label, fontSize: 12, marginBottom: 6, display: 'block' }}>
+          Built-in Presets
+        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {Object.values(TRANSFORMER_PRESETS).map((preset) => (
+            <label key={preset.id} style={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={enabledTransformers.includes(preset.id)}
+                onChange={() => togglePreset(preset.id)}
+              />
+              <span>
+                {preset.name}
+                <span style={{ color: '#9ca3af', fontSize: 11, marginLeft: 6 }}>
+                  {preset.componentName} → {preset.labelProp}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom rules list */}
+      {customRules.length > 0 && (
+        <div>
+          <span style={{ ...styles.label, fontSize: 12, marginBottom: 6, display: 'block' }}>
+            Custom Rules
+          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {customRules.map((rule) => (
+              <div
+                key={rule.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '4px 8px',
+                  background: '#f9fafb',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                }}
+              >
+                <span style={{ flex: 1 }}>
+                  {rule.componentName} → {rule.labelProp}
+                  <span style={{ color: '#9ca3af', marginLeft: 6 }}>({rule.matchStrategy})</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeCustomRule(rule.id)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#ef4444',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    padding: '2px 4px',
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Add custom rule form */}
+      <div>
+        <span style={{ ...styles.label, fontSize: 12, marginBottom: 6, display: 'block' }}>
+          Add Custom Rule
+        </span>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 6,
+            padding: 10,
+            border: '1px solid #e5e7eb',
+            borderRadius: 6,
+            background: '#fafafa',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>Component Name *</span>
+            <input
+              type="text"
+              style={{ ...styles.input, fontSize: 12, padding: '5px 8px' }}
+              placeholder="FormattedMessage"
+              value={draft.componentName}
+              onChange={(e) => setDraft({ ...draft, componentName: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>Label Prop *</span>
+            <input
+              type="text"
+              style={{ ...styles.input, fontSize: 12, padding: '5px 8px' }}
+              placeholder="defaultMessage"
+              value={draft.labelProp}
+              onChange={(e) => setDraft({ ...draft, labelProp: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>Navigate to Prop</span>
+            <input
+              type="text"
+              style={{ ...styles.input, fontSize: 12, padding: '5px 8px' }}
+              placeholder="(same as label prop)"
+              value={draft.navigateToProp}
+              onChange={(e) => setDraft({ ...draft, navigateToProp: e.target.value })}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ fontSize: 11, color: '#6b7280' }}>Match Strategy</span>
+            <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
+              <label style={{ ...styles.radioLabel, fontSize: 12 }}>
+                <input
+                  type="radio"
+                  name="matchStrategy"
+                  checked={draft.matchStrategy === 'childFiber'}
+                  onChange={() => setDraft({ ...draft, matchStrategy: 'childFiber' })}
+                />
+                Child Fiber
+              </label>
+              <label style={{ ...styles.radioLabel, fontSize: 12 }}>
+                <input
+                  type="radio"
+                  name="matchStrategy"
+                  checked={draft.matchStrategy === 'direct'}
+                  onChange={() => setDraft({ ...draft, matchStrategy: 'direct' })}
+                />
+                Direct
+              </label>
+            </div>
+          </div>
+          <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={addCustomRule}
+              disabled={!draft.componentName.trim() || !draft.labelProp.trim()}
+              style={{
+                ...styles.saveBtn,
+                padding: '5px 14px',
+                fontSize: 12,
+                opacity: !draft.componentName.trim() || !draft.labelProp.trim() ? 0.5 : 1,
+              }}
+            >
+              + Add Rule
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

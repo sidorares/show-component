@@ -33,6 +33,8 @@ chrome.runtime.onMessage.addListener(
           folderDisallowList: opts.folderDisallowList,
           mergeConsecutive: opts.mergeConsecutive,
           enabledOrigins: opts.enabledOrigins,
+          enabledTransformers: opts.enabledTransformers,
+          customTransformerRules: opts.customTransformerRules,
         };
         sendResponse(response);
       });
@@ -50,7 +52,7 @@ chrome.runtime.onMessage.addListener(
         .split('/')
         .map((segment) => encodeURIComponent(segment))
         .join('/');
-      const url = `${editorScheme}://file${encodedPath}:${line}:${column}`;
+      const url = `${editorScheme}://file${encodedPath}:${line}:${column + 1}`;
 
       chrome.tabs.update({ url });
       sendResponse({ ok: true });

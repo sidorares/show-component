@@ -1,7 +1,13 @@
 import JsonView from '@uiw/react-json-view';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { buildFiberChain } from '../core/fiber-utils';
+import type {
+  ChainTransformContext,
+  ChainTransformer,
+  TransformedEntry,
+} from '../core/chain-transformer';
+import { applyTransformer } from '../core/chain-transformer';
+import { buildFiberChain, getComponentName, getStackFrame } from '../core/fiber-utils';
 import { configureSourceRoot, resolveLocation } from '../core/source-location-resolver';
 import type { ClickToNodeInfo, ComponentHandle, NavigationEvent } from '../core/types';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
@@ -47,7 +53,14 @@ function ExternalLinkIcon({ size = 24, strokeWidth = 2 }: { size?: number; strok
   );
 }
 
-export type { ClickToNodeInfo, ComponentHandle, NavigationEvent };
+export type {
+  ChainTransformContext,
+  ChainTransformer,
+  TransformedEntry,
+  ClickToNodeInfo,
+  ComponentHandle,
+  NavigationEvent,
+};
 
 export interface ShowComponentProps {
   /**
@@ -108,6 +121,25 @@ export interface ShowComponentProps {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * Transform the component chain before it is displayed in the popover.
+   *
+   * A {@link ChainTransformer} receives the raw fiber chain and returns a
+   * new chain of {@link TransformedEntry} objects.  This allows collapsing
+   * entries (e.g. `span → FormattedMessage` → `"message text"`), relabelling
+   * components, and overriding navigation targets.
+   *
+   * @example
+   * ```tsx
+   * import { createFormattedMessageTransformer } from 'show-component/transformers/formatted-message';
+   *
+   * <ShowComponent
+   *   chainTransformer={createFormattedMessageTransformer()}
+   * />
+   * ```
+   */
+  chainTransformer?: ChainTransformer;
 }
 
 /**
@@ -138,7 +170,7 @@ function openInEditor(
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  const url = `${editorScheme}://file${encodedPath}:${line}:${column}`;
+  const url = `${editorScheme}://file${encodedPath}:${line}:${column + 1}`;
 
   if (debug) {
     console.log('[show-component] openInEditor:', {
@@ -198,6 +230,7 @@ export function ShowComponent({
   editorScheme,
   getClickTarget,
   debug,
+  chainTransformer,
 }: ShowComponentProps = {}) {
   // Keep stable refs so event handlers registered once (in useEffect [])
   // always see the latest callbacks without re-registering listeners.
@@ -213,16 +246,19 @@ export function ShowComponent({
   const debugRef = useRef(debug);
   debugRef.current = debug;
 
+  const chainTransformerRef = useRef(chainTransformer);
+  chainTransformerRef.current = chainTransformer;
+
   useEffect(() => {
     configureSourceRoot(sourceRoot);
   }, [sourceRoot]);
 
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const [fibersChain, setFibersChain] = useState<ClickToNodeInfo[]>([]);
+  const [displayChain, setDisplayChain] = useState<TransformedEntry[]>([]);
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
   interface PropsPopup {
     id: string;
-    component: ClickToNodeInfo;
+    entry: TransformedEntry;
     position: { x: number; y: number };
     size: { width: number; height: number };
   }
@@ -243,26 +279,50 @@ export function ShowComponent({
     direction: string;
   } | null>(null);
 
+  const buildTransformContext = useCallback(
+    (): ChainTransformContext => ({
+      resolveLocation: (sf, dbg) => resolveLocation(sf, dbg ?? debugRef.current),
+      getComponentName,
+      getStackFrame,
+    }),
+    []
+  );
+
+  const navigateFromEntry = useCallback(async (entry: TransformedEntry): Promise<boolean> => {
+    if (entry.resolveLocation) {
+      const loc = await entry.resolveLocation();
+      if (loc) {
+        openInEditor(
+          loc.source,
+          loc.line,
+          loc.column,
+          onNavigateRef.current,
+          entry.label,
+          editorSchemeRef.current,
+          debugRef.current
+        );
+        return true;
+      }
+      return false;
+    }
+    return resolveAndNavigate(
+      entry.sourceEntry,
+      onNavigateRef.current,
+      editorSchemeRef.current,
+      debugRef.current
+    );
+  }, []);
+
   const handleComponentClick = async (index: number) => {
     setIsPopoverOpen(false);
-    await resolveAndNavigate(
-      fibersChain[index],
-      onNavigateRef.current,
-      editorSchemeRef.current,
-      debugRef.current
-    );
+    await navigateFromEntry(displayChain[index]);
   };
 
-  const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
-    await resolveAndNavigate(
-      component,
-      onNavigateRef.current,
-      editorSchemeRef.current,
-      debugRef.current
-    );
+  const handleNavigateFromPopup = async (entry: TransformedEntry) => {
+    await navigateFromEntry(entry);
   };
 
-  const handlePropsClick = (component: ClickToNodeInfo) => {
+  const handlePropsClick = (entry: TransformedEntry) => {
     const popupId = `props-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     const popupWidth = 400;
@@ -288,13 +348,13 @@ export function ShowComponent({
 
     const newPopup: PropsPopup = {
       id: popupId,
-      component,
+      entry,
       position: { x: baseX, y: baseY },
       size: { width: popupWidth, height: popupHeight },
     };
 
     setPropsPopups((prev) => [...prev, newPopup]);
-    setIsPopoverOpen(false); // Close the main popover
+    setIsPopoverOpen(false);
   };
 
   // Handle dragging of props popups
@@ -414,7 +474,9 @@ export function ShowComponent({
 
       // Alt+Shift+RightClick: show the component chain popover
       if (event.shiftKey) {
-        setFibersChain(chain);
+        const ctx = buildTransformContext();
+        const transformed = applyTransformer(chain, chainTransformerRef.current, ctx);
+        setDisplayChain(transformed);
         setPopoverPosition({ x: event.clientX, y: event.clientY });
         setIsPopoverOpen(true);
         return;
@@ -452,6 +514,12 @@ export function ShowComponent({
             );
           }
         });
+      } else if (chainTransformerRef.current) {
+        const ctx = buildTransformContext();
+        const transformed = applyTransformer(chain, chainTransformerRef.current, ctx);
+        if (transformed.length > 0) {
+          navigateFromEntry(transformed[0]);
+        }
       } else {
         resolveAndNavigate(
           chain[0],
@@ -478,7 +546,7 @@ export function ShowComponent({
       document.removeEventListener('mousedown', handleMouseDown, true);
       document.removeEventListener('contextmenu', handleContextMenu, true);
     };
-  }, []);
+  }, [buildTransformContext, navigateFromEntry]);
 
   useEffect(() => {
     const active = draggingPopup || resizingPopup;
@@ -547,24 +615,24 @@ export function ShowComponent({
           }}
         >
           <div style={{ padding: '8px 6px' }}>
-            {fibersChain.map((component, index) => {
-              const hasProps =
-                component.props && Object.keys(component.props).some((k) => k !== 'children');
+            {displayChain.map((entry, index) => {
+              const entryProps = entry.props ?? entry.sourceEntry.props;
+              const hasProps = entryProps && Object.keys(entryProps).some((k) => k !== 'children');
 
               return (
-                <div key={`${component.componentName}-${index}`} className="sc-chain-row">
+                <div key={`${entry.label}-${index}`} className="sc-chain-row">
                   <button
                     type="button"
                     className="sc-chain-item"
                     onClick={() => handleComponentClick(index)}
                   >
-                    {component.componentName}
+                    {entry.label}
                   </button>
                   {hasProps && (
                     <button
                       type="button"
                       className="sc-icon-btn"
-                      onClick={() => handlePropsClick(component)}
+                      onClick={() => handlePropsClick(entry)}
                       title="Inspect props"
                     >
                       <BracesIcon size={14} strokeWidth={2} />
@@ -612,12 +680,12 @@ export function ShowComponent({
               flexShrink: 0,
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 13 }}>{popup.component.componentName}</span>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>{popup.entry.label}</span>
             <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <button
                 type="button"
                 className="sc-icon-btn"
-                onClick={() => handleNavigateFromPopup(popup.component)}
+                onClick={() => handleNavigateFromPopup(popup.entry)}
                 title="Go to source"
               >
                 <ExternalLinkIcon size={13} strokeWidth={2} />
@@ -665,21 +733,24 @@ export function ShowComponent({
               }
             }}
           >
-            {popup.component.props ? (
-              <JsonView
-                value={popup.component.props}
-                style={{
-                  fontSize: '12px',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                }}
-                collapsed={1}
-                displayDataTypes={false}
-                displayObjectSize={false}
-                shortenTextAfterLength={Math.max(20, Math.floor((popup.size.width - 60) / 7.2))}
-              />
-            ) : (
-              <div style={{ color: '#9ca3af', fontSize: 13 }}>No props available</div>
-            )}
+            {(() => {
+              const popupProps = popup.entry.props ?? popup.entry.sourceEntry.props;
+              return popupProps ? (
+                <JsonView
+                  value={popupProps}
+                  style={{
+                    fontSize: '12px',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                  }}
+                  collapsed={1}
+                  displayDataTypes={false}
+                  displayObjectSize={false}
+                  shortenTextAfterLength={Math.max(20, Math.floor((popup.size.width - 60) / 7.2))}
+                />
+              ) : (
+                <div style={{ color: '#9ca3af', fontSize: 13 }}>No props available</div>
+              );
+            })()}
           </div>
 
           {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const).map((dir) => (

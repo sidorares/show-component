@@ -40,6 +40,8 @@ export interface GetOptionsRequest {
   type: 'GET_OPTIONS';
 }
 
+import type { TransformerRule } from '../../../src/transformers/transformer-rule';
+
 export interface GetOptionsResponse {
   enabled: boolean;
   sourceRoot: string;
@@ -49,6 +51,8 @@ export interface GetOptionsResponse {
   folderDisallowList: string[];
   mergeConsecutive: boolean;
   enabledOrigins: string[];
+  enabledTransformers: string[];
+  customTransformerRules: TransformerRule[];
 }
 
 export interface OpenEditorRequest {

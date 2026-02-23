@@ -14,3 +14,13 @@ const ShowComponent: typeof ShowComponentImpl =
 export { ShowComponent };
 export { configureSourceRoot, clearCaches } from './core/source-location-resolver';
 export type { ComponentHandle, NavigationEvent, ShowComponentProps } from './react/ShowComponent';
+
+export type {
+  ChainTransformer,
+  ChainTransformContext,
+  TransformedEntry,
+} from './core/chain-transformer';
+export { createFormattedMessageTransformer } from './transformers/formatted-message';
+export { findJsxPropValueLocation } from './transformers/formatted-message';
+export type { TransformerRule } from './transformers/transformer-rule';
+export { TRANSFORMER_PRESETS, createRuleBasedTransformer } from './transformers/transformer-rule';

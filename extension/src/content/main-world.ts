@@ -5,9 +5,16 @@
  * Communicates with the ISOLATED world bridge via window.postMessage.
  */
 
-import { buildFiberChain } from '../../../src/core/fiber-utils';
+import type { ChainTransformer, TransformedEntry } from '../../../src/core/chain-transformer';
+import { applyTransformer } from '../../../src/core/chain-transformer';
+import { buildFiberChain, getComponentName, getStackFrame } from '../../../src/core/fiber-utils';
 import { configureSourceRoot, resolveLocation } from '../../../src/core/source-location-resolver';
 import type { ClickToNodeInfo } from '../../../src/core/types';
+import type { TransformerRule } from '../../../src/transformers/transformer-rule';
+import {
+  TRANSFORMER_PRESETS,
+  createRuleBasedTransformer,
+} from '../../../src/transformers/transformer-rule';
 import { MSG_SOURCE } from '../shared/messaging';
 import type { GetOptionsResponse, ResolvedLocationMessage } from '../shared/messaging';
 
@@ -19,6 +26,7 @@ let debug = false;
 let componentDisallowList: string[] = [];
 let folderDisallowList: string[] = [];
 let mergeConsecutive = false;
+let chainTransformer: ChainTransformer | undefined;
 
 // ─── Options sync (received from bridge) ─────────────────────────────────────
 
@@ -38,6 +46,17 @@ window.addEventListener('message', (event) => {
     if (sourceRoot) {
       configureSourceRoot(sourceRoot);
     }
+
+    // Rebuild transformer from enabled presets + custom rules
+    const rules: TransformerRule[] = [];
+    for (const id of opts.enabledTransformers || []) {
+      const preset = TRANSFORMER_PRESETS[id];
+      if (preset) rules.push(preset);
+    }
+    for (const rule of opts.customTransformerRules || []) {
+      rules.push(rule);
+    }
+    chainTransformer = rules.length > 0 ? createRuleBasedTransformer(rules) : undefined;
   }
 
   if (event.data.type === 'TRIGGER_INSPECT') {
@@ -95,6 +114,50 @@ function filterChain(chain: ClickToNodeInfo[]): ClickToNodeInfo[] {
   return filtered;
 }
 
+// ─── Transform context + helpers ──────────────────────────────────────────────
+
+function buildTransformContext() {
+  return {
+    resolveLocation: (stackFrame: string) => resolveLocation(stackFrame, debug),
+    getComponentName,
+    getStackFrame,
+  };
+}
+
+function transformChain(chain: ClickToNodeInfo[]): TransformedEntry[] {
+  return applyTransformer(chain, chainTransformer, buildTransformContext());
+}
+
+async function navigateFromEntry(entry: TransformedEntry): Promise<void> {
+  if (entry.resolveLocation) {
+    try {
+      if (debug) console.log('[show-component-ext] resolving transformed entry:', entry.label);
+      const loc = await entry.resolveLocation();
+      if (loc) {
+        if (debug) console.log('[show-component-ext] resolved to:', loc);
+        const msg: ResolvedLocationMessage = {
+          source: MSG_SOURCE,
+          type: 'RESOLVED_LOCATION',
+          payload: { source: loc.source, line: loc.line, column: loc.column },
+        };
+        window.postMessage(msg, '*');
+        return;
+      }
+      if (debug) console.warn('[show-component-ext] resolveLocation returned null, falling back');
+    } catch (err) {
+      console.error('[show-component-ext] resolveLocation failed:', err);
+    }
+  } else if (debug) {
+    console.warn(
+      '[show-component-ext] no resolveLocation on entry:',
+      entry.label,
+      '— sourceEntry.stackFrame:',
+      entry.sourceEntry.stackFrame ?? '(none)'
+    );
+  }
+  navigateToComponent(entry.sourceEntry);
+}
+
 // ─── Right-click handler ─────────────────────────────────────────────────────
 
 document.addEventListener(
@@ -115,6 +178,14 @@ document.addEventListener(
 
     const chain = filterChain(buildFiberChain(target));
     if (chain.length === 0) return;
+
+    if (chainTransformer) {
+      const transformed = transformChain(chain);
+      if (transformed.length > 0) {
+        navigateFromEntry(transformed[0]);
+        return;
+      }
+    }
     navigateToComponent(chain[0]);
   },
   true
@@ -193,6 +264,8 @@ function showChainOverlay(target: HTMLElement, x: number, y: number): void {
   const chain = filterChain(rawChain);
   if (chain.length === 0) return;
 
+  const entries = transformChain(chain);
+
   removeOverlay();
   const shadow = ensureOverlay();
 
@@ -200,34 +273,35 @@ function showChainOverlay(target: HTMLElement, x: number, y: number): void {
   container.className = 'sc-ext-popover';
 
   const maxX = window.innerWidth - 340;
-  const maxY = window.innerHeight - Math.min(chain.length * 32 + 20, 400);
+  const maxY = window.innerHeight - Math.min(entries.length * 32 + 20, 400);
   container.style.left = `${Math.min(x, maxX)}px`;
   container.style.top = `${Math.min(y, maxY)}px`;
 
   const list = document.createElement('div');
   list.className = 'sc-ext-list';
 
-  for (const entry of chain) {
+  for (const entry of entries) {
     const row = document.createElement('div');
     row.className = 'sc-ext-row';
 
     const btn = document.createElement('button');
     btn.className = 'sc-ext-item';
-    btn.textContent = entry.componentName;
+    btn.textContent = entry.label;
     btn.addEventListener('click', () => {
       removeOverlay();
-      navigateToComponent(entry);
+      navigateFromEntry(entry);
     });
     row.appendChild(btn);
 
-    const hasProps = entry.props && Object.keys(entry.props).some((k) => k !== 'children');
+    const props = entry.props ?? entry.sourceEntry.props;
+    const hasProps = props && Object.keys(props).some((k) => k !== 'children');
     if (hasProps) {
       const propsBtn = document.createElement('button');
       propsBtn.className = 'sc-ext-icon-btn';
       propsBtn.title = 'Inspect props';
       propsBtn.innerHTML = ICON_BRACES;
       propsBtn.addEventListener('click', () => {
-        openPropsPopup(entry, shadow);
+        openPropsPopup(entry.sourceEntry, shadow);
       });
       row.appendChild(propsBtn);
     }

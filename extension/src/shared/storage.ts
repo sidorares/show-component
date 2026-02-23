@@ -1,3 +1,7 @@
+import type { TransformerRule } from '../../../src/transformers/transformer-rule';
+
+export type { TransformerRule };
+
 export interface ExtensionOptions {
   enabled: boolean;
   sourceRoot: string;
@@ -7,6 +11,8 @@ export interface ExtensionOptions {
   folderDisallowList: string[];
   mergeConsecutive: boolean;
   enabledOrigins: string[];
+  enabledTransformers: string[];
+  customTransformerRules: TransformerRule[];
 }
 
 export const DEFAULT_OPTIONS: ExtensionOptions = {
@@ -18,6 +24,8 @@ export const DEFAULT_OPTIONS: ExtensionOptions = {
   folderDisallowList: [],
   mergeConsecutive: false,
   enabledOrigins: [],
+  enabledTransformers: [],
+  customTransformerRules: [],
 };
 
 export async function loadOptions(): Promise<ExtensionOptions> {

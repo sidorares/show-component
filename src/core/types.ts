@@ -3,6 +3,8 @@ export type Fiber = {
   _debugOwner: Fiber | null;
   _debugStack: Error;
   memoizedProps?: Record<string, unknown>;
+  child?: Fiber | null;
+  sibling?: Fiber | null;
 };
 
 export type ClickToNodeInfo = {
