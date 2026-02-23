@@ -7,7 +7,12 @@
 
 import type { ChainTransformer, TransformedEntry } from '../../../src/core/chain-transformer';
 import { applyTransformer } from '../../../src/core/chain-transformer';
-import { buildFiberChain, getComponentName, getStackFrame } from '../../../src/core/fiber-utils';
+import {
+  buildFiberChain,
+  getComponentName,
+  getStackFrame,
+  resolveComponentName,
+} from '../../../src/core/fiber-utils';
 import { configureSourceRoot, resolveLocation } from '../../../src/core/source-location-resolver';
 import type { ClickToNodeInfo } from '../../../src/core/types';
 import type { TransformerRule } from '../../../src/transformers/transformer-rule';
@@ -121,6 +126,7 @@ function buildTransformContext() {
     resolveLocation: (stackFrame: string) => resolveLocation(stackFrame, debug),
     getComponentName,
     getStackFrame,
+    debug,
   };
 }
 
@@ -129,12 +135,24 @@ function transformChain(chain: ClickToNodeInfo[]): TransformedEntry[] {
 }
 
 async function navigateFromEntry(entry: TransformedEntry): Promise<void> {
+  if (debug) {
+    const fiber = entry.sourceEntry.fiber;
+    const { name, reason } = resolveComponentName(fiber);
+    console.group('[show-component-ext] navigate:', entry.label);
+    console.log('fiber:', fiber);
+    console.log('name resolution:', name, `(${reason})`);
+    console.log('stackFrame:', entry.sourceEntry.stackFrame ?? '(none)');
+    console.log('hasResolveLocation:', !!entry.resolveLocation);
+  }
+
   if (entry.resolveLocation) {
     try {
-      if (debug) console.log('[show-component-ext] resolving transformed entry:', entry.label);
       const loc = await entry.resolveLocation();
       if (loc) {
-        if (debug) console.log('[show-component-ext] resolved to:', loc);
+        if (debug) {
+          console.log('resolved to:', `${loc.source}:${loc.line}:${loc.column}`);
+          console.groupEnd();
+        }
         const msg: ResolvedLocationMessage = {
           source: MSG_SOURCE,
           type: 'RESOLVED_LOCATION',
@@ -143,17 +161,17 @@ async function navigateFromEntry(entry: TransformedEntry): Promise<void> {
         window.postMessage(msg, '*');
         return;
       }
-      if (debug) console.warn('[show-component-ext] resolveLocation returned null, falling back');
+      if (debug) console.warn('resolveLocation returned null, falling back to navigateToComponent');
     } catch (err) {
       console.error('[show-component-ext] resolveLocation failed:', err);
     }
-  } else if (debug) {
-    console.warn(
-      '[show-component-ext] no resolveLocation on entry:',
-      entry.label,
-      '— sourceEntry.stackFrame:',
-      entry.sourceEntry.stackFrame ?? '(none)'
-    );
+  }
+
+  if (debug) {
+    if (!entry.sourceEntry.stackFrame) {
+      console.warn('fallback navigateToComponent will no-op: no stackFrame on sourceEntry');
+    }
+    console.groupEnd();
   }
   navigateToComponent(entry.sourceEntry);
 }
@@ -264,7 +282,31 @@ function showChainOverlay(target: HTMLElement, x: number, y: number): void {
   const chain = filterChain(rawChain);
   if (chain.length === 0) return;
 
+  if (debug) {
+    console.group('[show-component-ext] chain overlay');
+    console.log('target element:', target);
+    console.log('raw chain (%d entries):', rawChain.length);
+    for (const entry of rawChain) {
+      const { name, reason } = resolveComponentName(entry.fiber);
+      console.log(` • ${name} (${reason})`, entry.stackFrame ? '' : '⚠ no stackFrame', {
+        fiber: entry.fiber,
+      });
+    }
+    if (chain.length !== rawChain.length) {
+      console.log('filtered chain (%d entries):', chain.length);
+    }
+  }
+
   const entries = transformChain(chain);
+
+  if (debug) {
+    console.log('transformed entries:');
+    for (const e of entries) {
+      const tag = e.resolveLocation ? '→ custom resolve' : '→ default resolve';
+      console.log(` • "${e.label}" ${tag}`);
+    }
+    console.groupEnd();
+  }
 
   removeOverlay();
   const shadow = ensureOverlay();

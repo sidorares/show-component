@@ -6,6 +6,8 @@ import type {
 import type { ClickToNodeInfo, Fiber } from '../core/types';
 import { findChildFiber, findJsxPropValueLocation } from './formatted-message';
 
+const LOG_PREFIX = '[show-component]';
+
 // ─── Rule definition ─────────────────────────────────────────────────────────
 
 export interface TransformerRule {
@@ -101,14 +103,33 @@ function buildResolveLocation(
   rule: TransformerRule,
   ctx: ChainTransformContext
 ): (() => Promise<{ source: string; line: number; column: number } | null>) | undefined {
-  if (!stackFrame) return undefined;
+  if (!stackFrame) {
+    if (ctx.debug) {
+      console.warn(LOG_PREFIX, `no stackFrame for rule "${rule.name}" — resolveLocation disabled`);
+    }
+    return undefined;
+  }
 
   return async () => {
     const resolved = await ctx.resolveLocation(stackFrame);
-    if (!resolved) return null;
+    if (!resolved) {
+      if (ctx.debug) {
+        console.warn(LOG_PREFIX, `source resolution returned null for rule "${rule.name}"`, {
+          stackFrame,
+        });
+      }
+      return null;
+    }
 
     if (resolved.sourceContent) {
       const jsxName = unwrapComponentName(rule.componentName);
+      if (ctx.debug) {
+        console.log(
+          LOG_PREFIX,
+          `AST searching for <${jsxName}> prop "${rule.navigateToProp}"`,
+          `near ${resolved.source}:${resolved.line}:${resolved.column}`
+        );
+      }
       const propLoc = findJsxPropValueLocation(
         resolved.sourceContent,
         resolved.line,
@@ -117,8 +138,22 @@ function buildResolveLocation(
         rule.navigateToProp
       );
       if (propLoc) {
+        if (ctx.debug) {
+          console.log(
+            LOG_PREFIX,
+            `found prop value at ${resolved.source}:${propLoc.line}:${propLoc.column}`
+          );
+        }
         return { source: resolved.source, line: propLoc.line, column: propLoc.column };
       }
+      if (ctx.debug) {
+        console.warn(
+          LOG_PREFIX,
+          `prop "${rule.navigateToProp}" not found in AST, falling back to component location`
+        );
+      }
+    } else if (ctx.debug) {
+      console.warn(LOG_PREFIX, 'no sourceContent in resolved result — cannot do AST prop lookup');
     }
 
     return { source: resolved.source, line: resolved.line, column: resolved.column };
@@ -141,13 +176,31 @@ function matchChildFiber(
     (f: Fiber) => componentNameMatches(ctx.getComponentName(f), rule.componentName),
     rule.maxSearchDepth ?? 3
   );
-  if (!matched) return null;
 
+  if (!matched) {
+    if (ctx.debug) {
+      console.log(
+        LOG_PREFIX,
+        `childFiber: no "${rule.componentName}" found under <${entry.fiber.type}>`
+      );
+    }
+    return null;
+  }
+
+  const matchedName = ctx.getComponentName(matched);
   const props = matched.memoizedProps as Record<string, unknown> | undefined;
   const labelValue = props?.[rule.labelProp];
-  // Prefer the child fiber's own stack frame; fall back to the parent DOM
-  // element's frame (the one that's actually in the owner chain).
-  const stackFrame = ctx.getStackFrame(matched) ?? entry.stackFrame;
+  const childFrame = ctx.getStackFrame(matched);
+  const stackFrame = childFrame ?? entry.stackFrame;
+
+  if (ctx.debug) {
+    console.log(LOG_PREFIX, `childFiber: matched "${matchedName}" under <${entry.fiber.type}>`, {
+      fiber: matched,
+      labelProp: rule.labelProp,
+      labelValue: labelValue ?? '(missing)',
+      stackFrame: childFrame ? 'from child fiber' : 'fallback to parent entry',
+    });
+  }
 
   const info: ClickToNodeInfo = {
     componentName: rule.componentName,
@@ -177,6 +230,15 @@ function matchDirect(
 
   const props = entry.props;
   const labelValue = props?.[rule.labelProp];
+
+  if (ctx.debug) {
+    console.log(LOG_PREFIX, `direct: matched "${entry.componentName}" via rule "${rule.name}"`, {
+      fiber: entry.fiber,
+      labelProp: rule.labelProp,
+      labelValue: labelValue ?? '(missing)',
+      stackFrame: entry.stackFrame ?? '(none)',
+    });
+  }
 
   return {
     label: buildLabel(labelValue, rule),

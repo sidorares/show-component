@@ -1,30 +1,46 @@
 import type { ClickToNodeInfo, Fiber } from './types';
 
 export function getComponentName(fiber: Fiber): string {
+  return resolveComponentName(fiber).name;
+}
+
+interface ComponentNameResolution {
+  name: string;
+  /** How the name was determined — useful for debugging. */
+  reason: string;
+}
+
+/**
+ * Resolves a human-readable name from a fiber, returning both the name and
+ * a diagnostic `reason` string explaining which branch was taken.
+ * Use {@link getComponentName} when you only need the name.
+ */
+export function resolveComponentName(fiber: Fiber): ComponentNameResolution {
   try {
     if (typeof fiber.type === 'function') {
       const func = fiber.type as { name?: string; displayName?: string };
-      const name = func.name || func.displayName;
-      if (typeof name === 'string' && name.length > 0) {
-        return name;
+      if (func.displayName && typeof func.displayName === 'string') {
+        return { name: func.displayName, reason: 'function.displayName' };
+      }
+      if (func.name && typeof func.name === 'string' && func.name.length > 0) {
+        return { name: func.name, reason: 'function.name' };
       }
 
-      // Fallback: parse the function's toString() for a name
       try {
         const funcStr = fiber.type.toString();
         const match = funcStr.match(/^function\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
         if (match?.[1]) {
-          return match[1];
+          return { name: match[1], reason: 'function.toString() parse' };
         }
       } catch {
         // toString() can throw on exotic callables
       }
 
-      return 'Anonymous Function Component';
+      return { name: 'Anonymous Function Component', reason: 'function type, no name/displayName' };
     }
 
     if (typeof fiber.type === 'string') {
-      return fiber.type;
+      return { name: fiber.type, reason: 'native element' };
     }
 
     if (fiber.type && typeof fiber.type === 'object') {
@@ -34,34 +50,37 @@ export function getComponentName(fiber: Fiber): string {
         const render = obj.render as { name?: string; displayName?: string };
         const renderName = render.name || render.displayName;
         return renderName && typeof renderName === 'string'
-          ? `ForwardRef(${renderName})`
-          : 'ForwardRef(Anonymous)';
+          ? { name: `ForwardRef(${renderName})`, reason: `forwardRef, render.name=${renderName}` }
+          : { name: 'ForwardRef(Anonymous)', reason: 'forwardRef, no render name' };
       }
 
       if (obj.$$typeof && obj.type) {
         const wrappedName = getComponentNameFromType(obj.type);
         return wrappedName && typeof wrappedName === 'string' && wrappedName.length > 0
-          ? `Memo(${wrappedName})`
-          : 'Memo(Anonymous)';
+          ? { name: `Memo(${wrappedName})`, reason: `memo, wrapped=${wrappedName}` }
+          : { name: 'Memo(Anonymous)', reason: 'memo, no inner name' };
       }
 
       if (obj.displayName && typeof obj.displayName === 'string') {
-        return obj.displayName;
+        return { name: obj.displayName, reason: 'object.displayName' };
       }
       if (obj.name && typeof obj.name === 'string') {
-        return obj.name;
+        return { name: obj.name as string, reason: 'object.name' };
       }
 
-      return 'Component (Object Type)';
+      return {
+        name: 'Component (Object Type)',
+        reason: `object type, $$typeof=${String(obj.$$typeof ?? 'none')}`,
+      };
     }
 
     if (!fiber.type) {
-      return 'Component (No Type)';
+      return { name: 'Component (No Type)', reason: 'fiber.type is falsy' };
     }
 
-    return 'Component Name Unknown';
-  } catch {
-    return 'Component Name Unknown';
+    return { name: 'Component Name Unknown', reason: `unexpected type: ${typeof fiber.type}` };
+  } catch (err) {
+    return { name: 'Component Name Unknown', reason: `exception: ${err}` };
   }
 }
 

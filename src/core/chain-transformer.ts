@@ -50,6 +50,9 @@ export interface ChainTransformContext {
 
   /** Extract the relevant stack-frame line from a fiber's `_debugStack`. */
   getStackFrame: (fiber: Fiber) => string | undefined;
+
+  /** When true, transformer engine emits verbose console logs. */
+  debug?: boolean;
 }
 
 /**

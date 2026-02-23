@@ -24,7 +24,7 @@ export const DEFAULT_OPTIONS: ExtensionOptions = {
   folderDisallowList: [],
   mergeConsecutive: false,
   enabledOrigins: [],
-  enabledTransformers: [],
+  enabledTransformers: ['react-intl', 'react-i18next'],
   customTransformerRules: [],
 };
 
