@@ -218,6 +218,32 @@ function matchChildFiber(
 }
 
 /**
+ * Walk the fiber's `_debugOwner` chain looking for a usable stack frame.
+ * Stops after `maxDepth` hops to avoid traversing the entire tree.
+ */
+function findOwnerStackFrame(
+  fiber: Fiber,
+  ctx: ChainTransformContext,
+  maxDepth = 3
+): string | undefined {
+  let owner = fiber._debugOwner;
+  for (let i = 0; i < maxDepth && owner; i++) {
+    const frame = ctx.getStackFrame(owner);
+    if (frame) {
+      if (ctx.debug) {
+        console.log(
+          LOG_PREFIX,
+          `direct: borrowed stackFrame from owner "${ctx.getComponentName(owner)}" (depth ${i + 1})`
+        );
+      }
+      return frame;
+    }
+    owner = owner._debugOwner;
+  }
+  return undefined;
+}
+
+/**
  * Try to match a chain entry against a single rule using the `direct`
  * strategy.  Returns a {@link TransformedEntry} on match, or `null`.
  */
@@ -230,28 +256,46 @@ function matchDirect(
 
   const props = entry.props;
   const labelValue = props?.[rule.labelProp];
+  const stackFrame = entry.stackFrame ?? findOwnerStackFrame(entry.fiber, ctx);
 
   if (ctx.debug) {
     console.log(LOG_PREFIX, `direct: matched "${entry.componentName}" via rule "${rule.name}"`, {
       fiber: entry.fiber,
       labelProp: rule.labelProp,
       labelValue: labelValue ?? '(missing)',
-      stackFrame: entry.stackFrame ?? '(none)',
+      stackFrame: entry.stackFrame ? 'own' : stackFrame ? 'from owner' : '(none)',
     });
   }
 
   return {
     label: buildLabel(labelValue, rule),
-    sourceEntry: entry,
+    sourceEntry: { ...entry, stackFrame },
     props,
-    resolveLocation: buildResolveLocation(entry.stackFrame, rule, ctx),
+    resolveLocation: buildResolveLocation(stackFrame, rule, ctx),
   };
+}
+
+/**
+ * Try to match an entry against a rule using both strategies.
+ * `childFiber` is attempted first (only fires on native elements),
+ * then `direct` (only fires on matching component names).
+ */
+function matchEntry(
+  entry: ClickToNodeInfo,
+  rule: TransformerRule,
+  ctx: ChainTransformContext
+): TransformedEntry | null {
+  return matchChildFiber(entry, rule, ctx) ?? matchDirect(entry, rule, ctx);
 }
 
 /**
  * Creates a {@link ChainTransformer} driven by an array of declarative
  * {@link TransformerRule}s.  Each chain entry is tested against every rule
- * (first match wins).  Unmatched entries pass through unchanged.
+ * using both `childFiber` and `direct` strategies (first match wins).
+ *
+ * Consecutive entries that transform to the same label are collapsed
+ * (e.g. `FormattedMessage` + `Memo(FormattedMessage)` → single entry).
+ * When collapsing, the entry with a `resolveLocation` callback is preferred.
  */
 export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTransformer {
   if (rules.length === 0) {
@@ -270,20 +314,31 @@ export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTrans
       let transformed: TransformedEntry | null = null;
 
       for (const rule of rules) {
-        transformed =
-          rule.matchStrategy === 'childFiber'
-            ? matchChildFiber(entry, rule, ctx)
-            : matchDirect(entry, rule, ctx);
+        transformed = matchEntry(entry, rule, ctx);
         if (transformed) break;
       }
 
-      result.push(
-        transformed ?? {
-          label: entry.componentName,
-          sourceEntry: entry,
-          props: entry.props,
+      const output = transformed ?? {
+        label: entry.componentName,
+        sourceEntry: entry,
+        props: entry.props,
+      };
+
+      // Collapse consecutive entries with the same transformed label
+      // (e.g. FormattedMessage + Memo(FormattedMessage) both become "Timeline").
+      // Keep the one with a resolveLocation callback, or the later one.
+      const prev = result[result.length - 1];
+      if (prev && transformed && prev.label === output.label) {
+        if (ctx.debug) {
+          console.log(LOG_PREFIX, `dedup: collapsing consecutive "${output.label}"`);
         }
-      );
+        if (!prev.resolveLocation && output.resolveLocation) {
+          result[result.length - 1] = output;
+        }
+        continue;
+      }
+
+      result.push(output);
     }
 
     return result;
