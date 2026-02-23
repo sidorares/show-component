@@ -62,6 +62,14 @@ window.addEventListener('message', (event) => {
       rules.push(rule);
     }
     chainTransformer = rules.length > 0 ? createRuleBasedTransformer(rules) : undefined;
+    if (debug) {
+      console.log(
+        '[show-component-ext] options loaded — transformer:',
+        chainTransformer
+          ? `${rules.length} rule(s): ${rules.map((r) => r.name || r.componentName).join(', ')}`
+          : 'disabled'
+      );
+    }
   }
 
   if (event.data.type === 'TRIGGER_INSPECT') {
