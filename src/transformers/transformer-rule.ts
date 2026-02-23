@@ -86,15 +86,36 @@ function componentNameMatches(actualName: string, targetName: string): boolean {
 
 // ─── Generic rule-based engine ───────────────────────────────────────────────
 
+/**
+ * Extract a displayable string from a prop value.
+ * Handles plain strings and compiled ICU message ASTs
+ * (e.g. `[{ type: 0, value: "Hello" }, { type: 1, value: "name" }]`
+ * produced by `babel-plugin-formatjs` / `@formatjs/ts-transformer`).
+ */
+function extractStringValue(value: unknown): string | null {
+  if (typeof value === 'string') return value.length > 0 ? value : null;
+
+  if (!Array.isArray(value) || value.length === 0) return null;
+
+  // Compiled ICU AST: array of parts where type 0 = literal, others = variables
+  const parts: string[] = [];
+  for (const part of value) {
+    if (part && typeof part === 'object' && 'value' in part && typeof part.value === 'string') {
+      // type 0 = literal text, type 1 = argument (variable)
+      parts.push(part.type === 0 ? part.value : `{${part.value}}`);
+    }
+  }
+  return parts.length > 0 ? parts.join('') : null;
+}
+
 function buildLabel(value: unknown, rule: TransformerRule): string {
   const maxLen = rule.labelMaxLength ?? 60;
   const quoted = rule.labelQuoted ?? true;
 
-  if (typeof value !== 'string' || value.length === 0) {
-    return rule.componentName;
-  }
+  const text = extractStringValue(value);
+  if (!text) return rule.componentName;
 
-  const display = value.length > maxLen ? `${value.slice(0, maxLen - 3)}...` : value;
+  const display = text.length > maxLen ? `${text.slice(0, maxLen - 3)}...` : text;
   return quoted ? `"${display}"` : display;
 }
 
