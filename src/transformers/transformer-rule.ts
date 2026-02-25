@@ -330,6 +330,7 @@ export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTrans
 
   return (chain: ClickToNodeInfo[], ctx: ChainTransformContext): TransformedEntry[] => {
     const result: TransformedEntry[] = [];
+    let prevWasDefaultNative = false;
 
     for (const entry of chain) {
       let transformed: TransformedEntry | null = null;
@@ -345,10 +346,11 @@ export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTrans
         props: entry.props,
       };
 
+      const prev = result[result.length - 1];
+
       // Collapse consecutive entries with the same transformed label
       // (e.g. FormattedMessage + Memo(FormattedMessage) both become "Timeline").
       // Keep the one with a resolveLocation callback, or the later one.
-      const prev = result[result.length - 1];
       if (prev && transformed && prev.label === output.label) {
         if (ctx.debug) {
           console.log(LOG_PREFIX, `dedup: collapsing consecutive "${output.label}"`);
@@ -359,7 +361,21 @@ export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTrans
         continue;
       }
 
+      // A rule-matched entry directly following an unmatched native DOM element
+      // means the native element is the rendered output of the matched component
+      // (e.g. <FormattedMessage> renders a <span>). Absorb the native element
+      // so the user sees the readable label instead.
+      if (prev && transformed && prevWasDefaultNative) {
+        if (ctx.debug) {
+          console.log(LOG_PREFIX, `absorb: replacing native "${prev.label}" with "${output.label}"`);
+        }
+        result[result.length - 1] = output;
+        prevWasDefaultNative = false;
+        continue;
+      }
+
       result.push(output);
+      prevWasDefaultNative = !transformed && typeof entry.fiber.type === 'string';
     }
 
     return result;
