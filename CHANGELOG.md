@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.3.0](https://github.com/sidorares/show-component/compare/show-component-v2.2.1...show-component-v2.3.0) (2026-02-25)
+
+
+### Features
+
+* add Chrome extension for React component source navigation ([40fb5a5](https://github.com/sidorares/show-component/commit/40fb5a5d6e4e360bdb57b7307bb583e431d1bfa3))
+* add Chrome extension for React component source navigation ([c69bbc1](https://github.com/sidorares/show-component/commit/c69bbc1ebef344ce00fbada6b886b28cb91ce9fa))
+* configurable chain transformers in extension + fix column offset ([ee1308e](https://github.com/sidorares/show-component/commit/ee1308e5c0a1216a365f867df55fcb2bc62f5132))
+* **extension:** add props inspector popup to chain overlay ([5f0731c](https://github.com/sidorares/show-component/commit/5f0731ca9f82cb57886a7c6c247316da35527cf2))
+* **extension:** show resolved source path in go-to-source tooltip ([629612a](https://github.com/sidorares/show-component/commit/629612a8feaf79141bd6af81654b8bc102672fdb))
+* log active transformer rules on options load ([f2b5388](https://github.com/sidorares/show-component/commit/f2b5388945c4bcadd8b79d6ce952e4b1ca8461a2))
+* verbose debug logging for transformer and component resolution ([cfffbd2](https://github.com/sidorares/show-component/commit/cfffbd2df420103ff46edf3e73480a6a441dbb04))
+
+
+### Bug Fixes
+
+* absorb native DOM element preceding its owner i18n component ([a865f31](https://github.com/sidorares/show-component/commit/a865f31bec070503dbfc7a660fbc6ddc783099b3))
+* **extension:** add missing "scripting" permission to manifest ([08eac60](https://github.com/sidorares/show-component/commit/08eac60c7f1439eded08c68a2b9940d3309ff114))
+* **extension:** define process.env.NODE_ENV at build time ([6f5a0b1](https://github.com/sidorares/show-component/commit/6f5a0b15730ef566c1201c298cae3c268465b9ff))
+* format long console.log line to satisfy biome ([82a7af7](https://github.com/sidorares/show-component/commit/82a7af7323bce19c7f7461edce6360bf345b9fc7))
+* handle compiled ICU message ASTs in transformer labels ([f0c2e97](https://github.com/sidorares/show-component/commit/f0c2e9780bc26e5ad8e4ee2e8890a4bae676c8ac))
+* handle FormattedMessage in owner chain, not just child fibers ([4cbb6b5](https://github.com/sidorares/show-component/commit/4cbb6b5ebeb520128222b51e83ac42debe2fea4c))
+* handle Memo/ForwardRef wrappers in transformer name matching ([c719ca1](https://github.com/sidorares/show-component/commit/c719ca1c3b6f6e63fd9f283b1c9799db55f9e19c))
+
 ## [2.2.1](https://github.com/sidorares/show-component/compare/show-component-v2.2.0...show-component-v2.2.1) (2026-02-18)
 
 
