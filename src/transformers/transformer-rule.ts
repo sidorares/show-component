@@ -367,7 +367,10 @@ export function createRuleBasedTransformer(rules: TransformerRule[]): ChainTrans
       // so the user sees the readable label instead.
       if (prev && transformed && prevWasDefaultNative) {
         if (ctx.debug) {
-          console.log(LOG_PREFIX, `absorb: replacing native "${prev.label}" with "${output.label}"`);
+          console.log(
+            LOG_PREFIX,
+            `absorb: replacing native "${prev.label}" with "${output.label}"`
+          );
         }
         result[result.length - 1] = output;
         prevWasDefaultNative = false;
