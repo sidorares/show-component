@@ -1,5 +1,7 @@
-import React, { lazy, Suspense, useCallback } from 'react';
+import React, { lazy, Suspense, useCallback, useState } from 'react';
+import { IntlProvider } from 'react-intl';
 import { ShowComponent } from 'show-component';
+import { createFormattedMessageTransformer } from 'show-component/transformers/formatted-message';
 import type { NavigationEvent } from 'show-component';
 import { BasicButton, ArrowButton, CardWithContent } from './scenarios/BasicComponents';
 import { ForwardRefInput, MemoizedCard, DisplayNameComponent } from './scenarios/WrappedComponents';
@@ -7,7 +9,12 @@ import { DeepChainRoot } from './scenarios/DeepChain';
 import { AnonymousDefault, InlineAnonymous } from './scenarios/AnonymousComponents';
 import { EnhancedButton, EnhancedCard } from './scenarios/HOCPattern';
 import { DynamicImportScenario } from './scenarios/DynamicImport';
+import { WelcomeBanner } from './scenarios/IntlBasicMessage';
+import { PersonalGreeting } from './scenarios/IntlGreeting';
+import { NotificationBadge } from './scenarios/IntlPluralMessage';
 import { TestRunner } from './test-runner/TestRunner';
+
+const fmTransformer = createFormattedMessageTransformer();
 
 // ─── Navigation event capture ───────────────────────────────────────────────
 // Stores every navigation event the library would have fired so that:
@@ -62,6 +69,7 @@ export const TEST_MANIFEST = [
 // ─── App ────────────────────────────────────────────────────────────────────
 
 export function App() {
+  const [scEnabled, setScEnabled] = useState(true);
   const handleNavigate = useCallback((event: NavigationEvent) => {
     window.__sc_nav_events.push(event);
     // Structured log easily parsed by browser_console_messages
@@ -70,16 +78,27 @@ export function App() {
 
   return (
     <>
-      {/* The library's invisible overlay — enables Alt+Click / Alt+Shift+Click */}
-      {/* sourceRoot converts URL paths like /src/scenarios/Foo.tsx into
-          absolute filesystem paths the editor can open. */}
-      <ShowComponent
-        onNavigate={handleNavigate}
-        sourceRoot="/Users/laplace/Projects/show-component/test-app"
-      />
+      {scEnabled && (
+        <ShowComponent
+          onNavigate={handleNavigate}
+          sourceRoot="/Users/laplace/Projects/show-component/test-app"
+          chainTransformer={fmTransformer}
+        />
+      )}
 
       <header className="page-header">
-        <h1>show-component — Test Harness</h1>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h1 style={{ margin: 0 }}>show-component — Test Harness</h1>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer', userSelect: 'none' }}>
+            <span style={{ opacity: scEnabled ? 1 : 0.5 }}>ShowComponent {scEnabled ? 'ON' : 'OFF'}</span>
+            <input
+              type="checkbox"
+              checked={scEnabled}
+              onChange={(e) => setScEnabled(e.target.checked)}
+              style={{ width: 18, height: 18, cursor: 'pointer' }}
+            />
+          </label>
+        </div>
         <p>
           Every bordered box below is a test case. DOM elements carry{' '}
           <code>data-sc-test-id</code>, <code>data-sc-expect-owner</code>, and{' '}
@@ -203,6 +222,35 @@ export function App() {
               <DynamicImportScenario />
               <span className="test-case-meta">expect owner: LazyTarget (after load)</span>
             </div>
+          </div>
+        </section>
+
+        {/* 7. Intl / FormattedMessage */}
+        <section className="scenario-section" id="scenario-intl">
+          <div className="scenario-header">
+            FormattedMessage <span className="tag">react-intl chain transformer</span>
+          </div>
+          <div className="scenario-body">
+            <IntlProvider locale="en" defaultLocale="en">
+              <div className="test-case" data-sc-test-id="intl-basic">
+                <WelcomeBanner />
+                <span className="test-case-meta">
+                  transformer collapses span → FormattedMessage to message text
+                </span>
+              </div>
+              <div className="test-case" data-sc-test-id="intl-greeting">
+                <PersonalGreeting name="Alice" />
+                <span className="test-case-meta">
+                  message with &#123;name&#125; interpolation
+                </span>
+              </div>
+              <div className="test-case" data-sc-test-id="intl-plural">
+                <NotificationBadge count={5} />
+                <span className="test-case-meta">
+                  ICU plural syntax
+                </span>
+              </div>
+            </IntlProvider>
           </div>
         </section>
       </div>

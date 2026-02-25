@@ -1,0 +1,24 @@
+{
+  "name": "show-component-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension for show-component — navigate to React component source code",
+  "scripts": {
+    "build": "tsup && node scripts/copy-static.mjs",
+    "build:watch": "tsup --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.5",
+    "tsup": "^8.5.1",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@jridgewell/source-map": "^0.3.11",
+    "convert-source-map": "^2.0.0"
+  }
+}

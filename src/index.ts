@@ -1,4 +1,4 @@
-import { ShowComponent as ShowComponentImpl } from './ShowComponent';
+import { ShowComponent as ShowComponentImpl } from './react/ShowComponent';
 
 /**
  * In production builds the dev-only component is replaced with a no-op that
@@ -12,5 +12,15 @@ const ShowComponent: typeof ShowComponentImpl =
   process.env.NODE_ENV === 'development' ? ShowComponentImpl : ((() => null) as any);
 
 export { ShowComponent };
-export { configureSourceRoot, clearCaches } from './lib/source-location-resolver';
-export type { ComponentHandle, NavigationEvent, ShowComponentProps } from './ShowComponent';
+export { configureSourceRoot, clearCaches } from './core/source-location-resolver';
+export type { ComponentHandle, NavigationEvent, ShowComponentProps } from './react/ShowComponent';
+
+export type {
+  ChainTransformer,
+  ChainTransformContext,
+  TransformedEntry,
+} from './core/chain-transformer';
+export { createFormattedMessageTransformer } from './transformers/formatted-message';
+export { findJsxPropValueLocation } from './transformers/formatted-message';
+export type { TransformerRule } from './transformers/transformer-rule';
+export { TRANSFORMER_PRESETS, createRuleBasedTransformer } from './transformers/transformer-rule';

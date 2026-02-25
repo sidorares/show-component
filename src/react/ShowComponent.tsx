@@ -1,8 +1,16 @@
 import JsonView from '@uiw/react-json-view';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  ChainTransformContext,
+  ChainTransformer,
+  TransformedEntry,
+} from '../core/chain-transformer';
+import { applyTransformer } from '../core/chain-transformer';
+import { buildFiberChain, getComponentName, getStackFrame } from '../core/fiber-utils';
+import { configureSourceRoot, resolveLocation } from '../core/source-location-resolver';
+import type { ClickToNodeInfo, ComponentHandle, NavigationEvent } from '../core/types';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
-import { configureSourceRoot, resolveLocation } from './lib/source-location-resolver';
 
 /* ── Inline SVG icons (replaces lucide-react to avoid 43 MB dependency) ── */
 
@@ -45,49 +53,14 @@ function ExternalLinkIcon({ size = 24, strokeWidth = 2 }: { size?: number; strok
   );
 }
 
-type Fiber = {
-  type: string | ((...args: unknown[]) => unknown) | Record<string, unknown>;
-  _debugOwner: Fiber | null;
-  _debugStack: Error;
-  memoizedProps?: Record<string, unknown>;
+export type {
+  ChainTransformContext,
+  ChainTransformer,
+  TransformedEntry,
+  ClickToNodeInfo,
+  ComponentHandle,
+  NavigationEvent,
 };
-
-type ClickToNodeInfo = {
-  componentName: string;
-  /** Raw stack-trace frame line, e.g. "at LevelD (http://…:18:26)" */
-  stackFrame: string | undefined;
-  /** The React fiber node — useful for debugging stack resolution issues. */
-  fiber: Fiber;
-  props: Record<string, unknown> | undefined;
-};
-
-export interface ComponentHandle {
-  /** Display name of the component. */
-  componentName: string;
-  /** Props of the component (from React fiber internals). */
-  props: Record<string, unknown> | undefined;
-  /** Position in the chain (0 = closest to the clicked DOM element). */
-  index: number;
-  /**
-   * Lazily resolve the original source location via source maps.
-   * The result is cached — subsequent calls return instantly.
-   * Only performs work (network fetch + source-map parse) when called.
-   */
-  resolveSource: () => Promise<{ source: string; line: number; column: number } | null>;
-}
-
-export interface NavigationEvent {
-  /** Resolved (original) source file path */
-  source: string;
-  /** Line number in the original source */
-  line: number;
-  /** Column number in the original source */
-  column: number;
-  /** The editor protocol URL that would have been opened (e.g. cursor://file/…) */
-  url: string;
-  /** The component name that was navigated to, when available */
-  componentName?: string;
-}
 
 export interface ShowComponentProps {
   /**
@@ -148,6 +121,25 @@ export interface ShowComponentProps {
    * @default false
    */
   debug?: boolean;
+
+  /**
+   * Transform the component chain before it is displayed in the popover.
+   *
+   * A {@link ChainTransformer} receives the raw fiber chain and returns a
+   * new chain of {@link TransformedEntry} objects.  This allows collapsing
+   * entries (e.g. `span → FormattedMessage` → `"message text"`), relabelling
+   * components, and overriding navigation targets.
+   *
+   * @example
+   * ```tsx
+   * import { createFormattedMessageTransformer } from 'show-component/transformers/formatted-message';
+   *
+   * <ShowComponent
+   *   chainTransformer={createFormattedMessageTransformer()}
+   * />
+   * ```
+   */
+  chainTransformer?: ChainTransformer;
 }
 
 /**
@@ -178,7 +170,7 @@ function openInEditor(
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  const url = `${editorScheme}://file${encodedPath}:${line}:${column}`;
+  const url = `${editorScheme}://file${encodedPath}:${line}:${column + 1}`;
 
   if (debug) {
     console.log('[show-component] openInEditor:', {
@@ -198,154 +190,6 @@ function openInEditor(
     // some browsers won't trigger the OS handler otherwise.
     window.location.href = url;
   }
-}
-
-function getComponentName(fiber: Fiber): string {
-  try {
-    if (typeof fiber.type === 'function') {
-      const func = fiber.type as { name?: string; displayName?: string };
-      const name = func.name || func.displayName;
-      if (typeof name === 'string' && name.length > 0) {
-        return name;
-      }
-
-      // Fallback: parse the function's toString() for a name
-      try {
-        const funcStr = fiber.type.toString();
-        const match = funcStr.match(/^function\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-        if (match?.[1]) {
-          return match[1];
-        }
-      } catch {
-        // toString() can throw on exotic callables
-      }
-
-      return 'Anonymous Function Component';
-    }
-
-    if (typeof fiber.type === 'string') {
-      return fiber.type;
-    }
-
-    if (fiber.type && typeof fiber.type === 'object') {
-      const obj = fiber.type as Record<string, unknown>;
-
-      if (obj.$$typeof && obj.render) {
-        const render = obj.render as { name?: string; displayName?: string };
-        const renderName = render.name || render.displayName;
-        return renderName && typeof renderName === 'string'
-          ? `ForwardRef(${renderName})`
-          : 'ForwardRef(Anonymous)';
-      }
-
-      if (obj.$$typeof && obj.type) {
-        const wrappedName = getComponentNameFromType(obj.type);
-        return wrappedName && typeof wrappedName === 'string' && wrappedName.length > 0
-          ? `Memo(${wrappedName})`
-          : 'Memo(Anonymous)';
-      }
-
-      if (obj.displayName && typeof obj.displayName === 'string') {
-        return obj.displayName;
-      }
-      if (obj.name && typeof obj.name === 'string') {
-        return obj.name;
-      }
-
-      return 'Component (Object Type)';
-    }
-
-    if (!fiber.type) {
-      return 'Component (No Type)';
-    }
-
-    return 'Component Name Unknown';
-  } catch {
-    return 'Component Name Unknown';
-  }
-}
-
-function getComponentNameFromType(type: unknown): string {
-  try {
-    if (typeof type === 'string') {
-      return type;
-    }
-
-    if (typeof type === 'function') {
-      const func = type as { displayName?: string; name?: string };
-      return func.displayName || func.name || 'Anonymous';
-    }
-
-    if (type && typeof type === 'object') {
-      const obj = type as { displayName?: string; name?: string };
-      if (obj.displayName && typeof obj.displayName === 'string') {
-        return obj.displayName;
-      }
-
-      if (obj.name && typeof obj.name === 'string') {
-        return obj.name;
-      }
-    }
-
-    return 'Unknown';
-  } catch {
-    return 'Unknown';
-  }
-}
-
-// Which meaningful stack frame to use (0-based, after filtering React internals).
-// 0 = first non-internal frame (usually jsxDEV), 1 = the actual user component.
-const STACK_FRAME_INDEX = 1;
-
-/**
- * Returns `true` for stack-frame lines that can never resolve to user code
- * and should be excluded when looking for the "real" component frame.
- */
-function isUnresolvableFrame(line: string): boolean {
-  // React internals shipped with the framework runtime
-  if (line.includes('react-dom') || line.includes('scheduler') || line.includes('react-server-dom'))
-    return true;
-
-  // React debug-stack sentinels & helpers
-  if (
-    line.includes('fakeJSXCallSite') ||
-    line.includes('react-stack-top-frame') ||
-    line.includes('react_stack_bottom_frame') ||
-    line.includes('initializeElement') ||
-    line.includes('initializeFakeStack') ||
-    line.includes('createFakeJSXCallStack')
-  )
-    return true;
-
-  // Native built-ins (e.g. Promise.all) that have no source-mappable URL
-  if (line.includes('<anonymous>')) return true;
-
-  return false;
-}
-
-/** Extracts the relevant stack-trace frame from a fiber's `_debugStack`. */
-function getStackFrame(fiber: Fiber): string | undefined {
-  const stack = fiber._debugStack?.stack;
-  if (!stack) return undefined;
-
-  const lines = stack.split('\n');
-  const meaningfulLines: string[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line && !isUnresolvableFrame(line)) {
-      meaningfulLines.push(line);
-    }
-  }
-
-  return meaningfulLines[STACK_FRAME_INDEX] || meaningfulLines[0] || undefined;
-}
-
-/** Reads the React fiber attached to a DOM node via the internal `__reactFiber$…` property. */
-function findFiberElementFromNode(node: Node): Fiber | null {
-  const properties = Object.getOwnPropertyNames(node);
-  const fiberProperty = properties.find((p) => p.startsWith('__reactFiber'));
-  if (!fiberProperty) return null;
-  return node[fiberProperty as keyof typeof node] as unknown as Fiber;
 }
 
 /**
@@ -386,6 +230,7 @@ export function ShowComponent({
   editorScheme,
   getClickTarget,
   debug,
+  chainTransformer,
 }: ShowComponentProps = {}) {
   // Keep stable refs so event handlers registered once (in useEffect [])
   // always see the latest callbacks without re-registering listeners.
@@ -401,16 +246,19 @@ export function ShowComponent({
   const debugRef = useRef(debug);
   debugRef.current = debug;
 
+  const chainTransformerRef = useRef(chainTransformer);
+  chainTransformerRef.current = chainTransformer;
+
   useEffect(() => {
     configureSourceRoot(sourceRoot);
   }, [sourceRoot]);
 
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-  const [fibersChain, setFibersChain] = useState<ClickToNodeInfo[]>([]);
+  const [displayChain, setDisplayChain] = useState<TransformedEntry[]>([]);
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
   interface PropsPopup {
     id: string;
-    component: ClickToNodeInfo;
+    entry: TransformedEntry;
     position: { x: number; y: number };
     size: { width: number; height: number };
   }
@@ -431,26 +279,50 @@ export function ShowComponent({
     direction: string;
   } | null>(null);
 
+  const buildTransformContext = useCallback(
+    (): ChainTransformContext => ({
+      resolveLocation: (sf, dbg) => resolveLocation(sf, dbg ?? debugRef.current),
+      getComponentName,
+      getStackFrame,
+    }),
+    []
+  );
+
+  const navigateFromEntry = useCallback(async (entry: TransformedEntry): Promise<boolean> => {
+    if (entry.resolveLocation) {
+      const loc = await entry.resolveLocation();
+      if (loc) {
+        openInEditor(
+          loc.source,
+          loc.line,
+          loc.column,
+          onNavigateRef.current,
+          entry.label,
+          editorSchemeRef.current,
+          debugRef.current
+        );
+        return true;
+      }
+      return false;
+    }
+    return resolveAndNavigate(
+      entry.sourceEntry,
+      onNavigateRef.current,
+      editorSchemeRef.current,
+      debugRef.current
+    );
+  }, []);
+
   const handleComponentClick = async (index: number) => {
     setIsPopoverOpen(false);
-    await resolveAndNavigate(
-      fibersChain[index],
-      onNavigateRef.current,
-      editorSchemeRef.current,
-      debugRef.current
-    );
+    await navigateFromEntry(displayChain[index]);
   };
 
-  const handleNavigateFromPopup = async (component: ClickToNodeInfo) => {
-    await resolveAndNavigate(
-      component,
-      onNavigateRef.current,
-      editorSchemeRef.current,
-      debugRef.current
-    );
+  const handleNavigateFromPopup = async (entry: TransformedEntry) => {
+    await navigateFromEntry(entry);
   };
 
-  const handlePropsClick = (component: ClickToNodeInfo) => {
+  const handlePropsClick = (entry: TransformedEntry) => {
     const popupId = `props-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
     const popupWidth = 400;
@@ -476,13 +348,13 @@ export function ShowComponent({
 
     const newPopup: PropsPopup = {
       id: popupId,
-      component,
+      entry,
       position: { x: baseX, y: baseY },
       size: { width: popupWidth, height: popupHeight },
     };
 
     setPropsPopups((prev) => [...prev, newPopup]);
-    setIsPopoverOpen(false); // Close the main popover
+    setIsPopoverOpen(false);
   };
 
   // Handle dragging of props popups
@@ -591,32 +463,6 @@ export function ShowComponent({
     };
 
   useEffect(() => {
-    /** Walks the fiber tree from a DOM node upward through `_debugOwner`. */
-    function buildFiberChain(target: HTMLElement): ClickToNodeInfo[] {
-      const chain: ClickToNodeInfo[] = [];
-      let fiber = findFiberElementFromNode(target);
-
-      while (fiber) {
-        let props: Record<string, unknown> | undefined;
-        try {
-          if (fiber.memoizedProps) {
-            props = fiber.memoizedProps as Record<string, unknown>;
-          }
-        } catch {
-          props = undefined;
-        }
-
-        chain.push({
-          componentName: getComponentName(fiber),
-          stackFrame: getStackFrame(fiber),
-          fiber,
-          props,
-        });
-        fiber = fiber._debugOwner;
-      }
-      return chain;
-    }
-
     const handleContextMenu = (event: MouseEvent) => {
       if (!event.altKey) return;
 
@@ -628,7 +474,9 @@ export function ShowComponent({
 
       // Alt+Shift+RightClick: show the component chain popover
       if (event.shiftKey) {
-        setFibersChain(chain);
+        const ctx = buildTransformContext();
+        const transformed = applyTransformer(chain, chainTransformerRef.current, ctx);
+        setDisplayChain(transformed);
         setPopoverPosition({ x: event.clientX, y: event.clientY });
         setIsPopoverOpen(true);
         return;
@@ -666,6 +514,12 @@ export function ShowComponent({
             );
           }
         });
+      } else if (chainTransformerRef.current) {
+        const ctx = buildTransformContext();
+        const transformed = applyTransformer(chain, chainTransformerRef.current, ctx);
+        if (transformed.length > 0) {
+          navigateFromEntry(transformed[0]);
+        }
       } else {
         resolveAndNavigate(
           chain[0],
@@ -692,7 +546,7 @@ export function ShowComponent({
       document.removeEventListener('mousedown', handleMouseDown, true);
       document.removeEventListener('contextmenu', handleContextMenu, true);
     };
-  }, []);
+  }, [buildTransformContext, navigateFromEntry]);
 
   useEffect(() => {
     const active = draggingPopup || resizingPopup;
@@ -761,24 +615,24 @@ export function ShowComponent({
           }}
         >
           <div style={{ padding: '8px 6px' }}>
-            {fibersChain.map((component, index) => {
-              const hasProps =
-                component.props && Object.keys(component.props).some((k) => k !== 'children');
+            {displayChain.map((entry, index) => {
+              const entryProps = entry.props ?? entry.sourceEntry.props;
+              const hasProps = entryProps && Object.keys(entryProps).some((k) => k !== 'children');
 
               return (
-                <div key={`${component.componentName}-${index}`} className="sc-chain-row">
+                <div key={`${entry.label}-${index}`} className="sc-chain-row">
                   <button
                     type="button"
                     className="sc-chain-item"
                     onClick={() => handleComponentClick(index)}
                   >
-                    {component.componentName}
+                    {entry.label}
                   </button>
                   {hasProps && (
                     <button
                       type="button"
                       className="sc-icon-btn"
-                      onClick={() => handlePropsClick(component)}
+                      onClick={() => handlePropsClick(entry)}
                       title="Inspect props"
                     >
                       <BracesIcon size={14} strokeWidth={2} />
@@ -826,12 +680,12 @@ export function ShowComponent({
               flexShrink: 0,
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 13 }}>{popup.component.componentName}</span>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>{popup.entry.label}</span>
             <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <button
                 type="button"
                 className="sc-icon-btn"
-                onClick={() => handleNavigateFromPopup(popup.component)}
+                onClick={() => handleNavigateFromPopup(popup.entry)}
                 title="Go to source"
               >
                 <ExternalLinkIcon size={13} strokeWidth={2} />
@@ -879,21 +733,24 @@ export function ShowComponent({
               }
             }}
           >
-            {popup.component.props ? (
-              <JsonView
-                value={popup.component.props}
-                style={{
-                  fontSize: '12px',
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                }}
-                collapsed={1}
-                displayDataTypes={false}
-                displayObjectSize={false}
-                shortenTextAfterLength={Math.max(20, Math.floor((popup.size.width - 60) / 7.2))}
-              />
-            ) : (
-              <div style={{ color: '#9ca3af', fontSize: 13 }}>No props available</div>
-            )}
+            {(() => {
+              const popupProps = popup.entry.props ?? popup.entry.sourceEntry.props;
+              return popupProps ? (
+                <JsonView
+                  value={popupProps}
+                  style={{
+                    fontSize: '12px',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                  }}
+                  collapsed={1}
+                  displayDataTypes={false}
+                  displayObjectSize={false}
+                  shortenTextAfterLength={Math.max(20, Math.floor((popup.size.width - 60) / 7.2))}
+                />
+              ) : (
+                <div style={{ color: '#9ca3af', fontSize: 13 }}>No props available</div>
+              );
+            })()}
           </div>
 
           {(['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as const).map((dir) => (

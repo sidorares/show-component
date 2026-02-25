@@ -6,7 +6,7 @@ export default defineConfig({
     // Second entry so ESM code-splitting places the dev-only component
     // (and its transitive deps) in a separate chunk that the consumer's
     // bundler can drop entirely in production.
-    ShowComponent: 'src/ShowComponent.tsx',
+    ShowComponent: 'src/react/ShowComponent.tsx',
   },
   format: ['cjs', 'esm'],
   dts: true,
