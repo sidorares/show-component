@@ -3,7 +3,7 @@ name: 'Canary Publishing'
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
 
           if [[ "$MESSAGE" =~ build\(deps-dev\) ]] ||
              [[ "$MESSAGE" =~ build\(deps\) ]] ||
-             [[ "$MESSAGE" =~ chore\(master\) ]] ||
+             [[ "$MESSAGE" =~ chore\(main\) ]] ||
              [[ "$MESSAGE" =~ chore\(deps\) ]] ||
              [[ "$MESSAGE" =~ chore:\ update\ dependencies ]] ||
              [[ "$MESSAGE" =~ docs: ]] ||
@@ -64,6 +64,10 @@ jobs:
       - name: Installing Dependencies
         if: steps.check_commit.outputs.publish == 'true'
         run: npm ci
+
+      - name: Run unit tests
+        if: steps.check_commit.outputs.publish == 'true'
+        run: npm test
 
       - name: compile
         if: steps.check_commit.outputs.publish == 'true'

@@ -132,7 +132,7 @@ export interface ShowComponentProps {
    *
    * @example
    * ```tsx
-   * import { createFormattedMessageTransformer } from 'show-component/transformers/formatted-message';
+   * import { createFormattedMessageTransformer } from 'show-component';
    *
    * <ShowComponent
    *   chainTransformer={createFormattedMessageTransformer()}

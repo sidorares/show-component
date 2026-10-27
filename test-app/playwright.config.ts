@@ -10,9 +10,7 @@ export default defineConfig({
   // Don't retry — flaky test results should be investigated, not masked.
   retries: 0,
 
-  // Fail fast: stop the suite on the first test failure so CI feedback is
-  // quick.  Individual soft-assertion failures within a test are still all
-  // reported before the test itself is marked failed.
+  // Fail the CI run if a stray test.only() was committed.
   forbidOnly: !!process.env.CI,
 
   reporter: process.env.CI

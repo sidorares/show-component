@@ -19,9 +19,6 @@ export default defineConfig([
     noExternal: [/.*/],
     outDir: 'dist',
     define,
-    esbuildOptions(options) {
-      options.alias = { '@core': '../src/core' };
-    },
   },
   {
     entry: {

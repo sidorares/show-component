@@ -28,7 +28,7 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '24'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
@@ -44,15 +44,13 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
         run: npm run type-check
 
+      - name: Run unit tests
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm test
+
       - name: Build project
         if: ${{ steps.release.outputs.release_created }}
         run: npm run build
-
-      - name: Publish to npm
-        if: ${{ steps.release.outputs.release_created }}
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Install extension dependencies
         if: ${{ steps.release.outputs.release_created }}
@@ -69,6 +67,12 @@ jobs:
         run: |
           cd extension/dist
           zip -r ../../show-component-chrome-extension-v${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}.zip .
+
+      - name: Publish to npm
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Upload extension to release
         if: ${{ steps.release.outputs.release_created }}
