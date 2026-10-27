@@ -48,7 +48,7 @@ extension/            Chrome MV3 extension (private, not published to npm)
   src/content/main-world.ts   runs in the page's MAIN world; imports ../../../src/core + transformers directly
   src/content/bridge.ts       ISOLATED world relay: page postMessage <-> chrome.runtime
   src/background/service-worker.ts  context menu, options, opens editor URL via chrome.tabs.update
-  src/popup, src/options      React 18 UIs; options stored in chrome.storage.sync
+  src/popup, src/options      React 19 UIs; options stored in chrome.storage.sync
 test-app/             Vite + React 19 app with scenarios and a Playwright e2e harness
   vite.config.ts      aliases 'show-component' -> ../src (tests run against live source, not dist/)
   src/scenarios/      one file per pattern (HOC, memo/forwardRef, lazy/dynamic import, react-intl, …)
@@ -107,12 +107,16 @@ Before committing, at minimum run in the root: `npm run lint && npm run type-che
 
 ## CI (`.github/workflows`)
 
-- `ci.yml` (push/PR to `main`): Biome lint, type-check, library build, extension build; separate job runs
-  the Playwright harness in `test-app`. Unit tests (`npm test`) are currently **not** run in CI.
-- `extension-build.yml` (PRs): builds the extension, uploads a zip artifact, comments on the PR.
-- `release.yml` (push to `main`): release-please; on release, lint + type-check + build + `npm publish --provenance`.
-- `canary.yml`: triggers on `master`, which does not exist (default branch is `main`), so it only runs via
-  manual dispatch.
+All workflows use Node 24.
+
+- `ci.yml` (push/PR to `main`): Biome lint, type-check, unit tests, library build, extension build; a
+  separate job runs the Playwright harness in `test-app`.
+- `extension-build.yml` (PRs): builds the extension, uploads a zip artifact, comments on the PR
+  (comment skipped for fork PRs).
+- `release.yml` (push to `main`): release-please; on release, lint + type-check + tests + build +
+  extension zip, then `npm publish --provenance` and upload of the zip to the GitHub release.
+- `canary.yml` (push to `main`): publishes `<next-patch>-canary.<sha>` under the npm `canary` tag, unless
+  the commit subject is `docs:`, `ci:`, `chore(deps):`, `chore(main):` (release-please) and similar.
 
 ## Gotchas
 
@@ -130,6 +134,7 @@ Before committing, at minimum run in the root: `npm run lint && npm run type-che
 - The extension relays page `postMessage` traffic; messages are only checked for `source === window`
   and a `MSG_SOURCE` tag, so page scripts can forge them. Don't add privileged message types without
   thinking about that.
-- `extension/` uses React 18; the library's dev setup and `test-app` use React 19.
-- `test-app` declares several unused deps (`clsx`, `tailwind-merge`, `class-variance-authority`,
-  `lucide-react`, `@radix-ui/react-slot`) left over from an earlier shadcn setup.
+- The `react`/`react-dom` peer range is intentionally `>=16.8.0` (the component is a harmless no-op
+  outside React 19 dev builds); don't narrow it without treating it as a breaking change.
+  Everything inside the repo (root dev install, `extension/`, `test-app/`) uses React 19 and
+  `@types/react` 19.
