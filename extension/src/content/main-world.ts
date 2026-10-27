@@ -41,7 +41,10 @@ window.addEventListener('message', (event) => {
 
   if (event.data.type === 'OPTIONS_UPDATE') {
     const opts = event.data.payload as GetOptionsResponse;
-    extensionEnabled = opts.enabled;
+    // An empty origin list means "enabled everywhere"
+    const enabledOrigins = (opts.enabledOrigins || []).map((o) => o.replace(/\/+$/, ''));
+    extensionEnabled =
+      opts.enabled && (enabledOrigins.length === 0 || enabledOrigins.includes(location.origin));
     sourceRoot = opts.sourceRoot || '';
     debug = opts.debug;
     componentDisallowList = opts.componentDisallowList || [];
@@ -73,7 +76,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (event.data.type === 'TRIGGER_INSPECT') {
-    if (lastMouseTarget) {
+    if (extensionEnabled && lastMouseTarget) {
       showChainOverlay(lastMouseTarget, lastMouseX, lastMouseY);
     }
   }
