@@ -31,13 +31,8 @@ export default defineConfig({
       'react-dom',
       '@jridgewell/source-map',
       '@radix-ui/react-popover',
-      '@radix-ui/react-slot',
       '@uiw/react-json-view',
-      'class-variance-authority',
-      'clsx',
       'convert-source-map',
-      'tailwind-merge',
-      'lucide-react',
     ],
   },
 
@@ -46,13 +41,8 @@ export default defineConfig({
     include: [
       '@jridgewell/source-map',
       '@radix-ui/react-popover',
-      '@radix-ui/react-slot',
       '@uiw/react-json-view',
-      'class-variance-authority',
-      'clsx',
       'convert-source-map',
-      'tailwind-merge',
-      'lucide-react',
     ],
   },
 
