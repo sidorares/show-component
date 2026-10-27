@@ -1,10 +1,20 @@
 export type Fiber = {
   type: string | ((...args: unknown[]) => unknown) | Record<string, unknown>;
   _debugOwner: Fiber | null;
-  _debugStack: Error;
+  /** React 19+: the `Error` captured where the element was created. */
+  _debugStack?: Error;
+  /** React ≤18: the JSX call site recorded by the JSX dev transform (`__source`). */
+  _debugSource?: DebugSource | null;
   memoizedProps?: Record<string, unknown>;
   child?: Fiber | null;
   sibling?: Fiber | null;
+};
+
+export type DebugSource = {
+  fileName: string;
+  lineNumber: number;
+  /** 1-based, like stack-trace columns. Older transforms omit it. */
+  columnNumber?: number;
 };
 
 export type ClickToNodeInfo = {

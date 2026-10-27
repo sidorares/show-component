@@ -76,6 +76,23 @@ function getSourceRoot(): string | undefined {
 }
 
 /**
+ * Pseudo-URL scheme for synthetic stack frames built from React ≤18's
+ * `fiber._debugSource` (see `getDebugSourceFrame` in fiber-utils).
+ */
+export const DEBUG_SOURCE_SCHEME = 'react-debug-source://';
+
+/**
+ * `_debugSource.fileName` is whatever the JSX transform was given — usually an
+ * absolute path, but some setups pass a project-relative one. Prefix those
+ * with the configured source root.
+ */
+function resolveDebugSourcePath(fileName: string): string {
+  if (fileName.startsWith('/') || /^[A-Za-z]:[\\/]/.test(fileName)) return fileName;
+  const fsRoot = getSourceRoot();
+  return fsRoot ? `${fsRoot}/${fileName.replace(/^\.\//, '')}` : fileName;
+}
+
+/**
  * Resolves a potentially-relative source path from a source map against
  * the URL of the file that contained the source map.
  *
@@ -606,6 +623,23 @@ export async function resolveLocation(
     if (debug) console.log('Extracted frame:', frameInfo);
 
     const { url, line, column } = frameInfo;
+
+    // ── React ≤18 `_debugSource` path ──────────────────────────────────────
+    // The location is already in original-source coordinates: no fetch, no map.
+    if (url.startsWith(DEBUG_SOURCE_SCHEME)) {
+      const result: ResolvedSourceInfo = {
+        source: resolveDebugSourcePath(url.slice(DEBUG_SOURCE_SCHEME.length)),
+        line,
+        // Stack-style 1-based column → the 0-based column resolved results use.
+        column: Math.max(0, column - 1),
+      };
+      if (debug) {
+        console.log('Resolved from _debugSource:', result);
+        console.groupEnd();
+      }
+      return result;
+    }
+
     const cacheKey = `${url}:${line}:${column}`;
 
     // L1: exact result cache

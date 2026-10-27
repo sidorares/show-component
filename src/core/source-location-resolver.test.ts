@@ -389,3 +389,40 @@ describe('resolveLocation — Next.js dev server integration', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1); // still 1
   });
 });
+
+// ─── resolveLocation — React ≤18 _debugSource frames ──────────────────────
+
+describe('resolveLocation — _debugSource frames', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    clearCaches();
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('should not fetch'));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    configureSourceRoot(undefined);
+  });
+
+  it('returns the absolute file path without fetching, with a 0-based column', async () => {
+    const result = await resolveLocation(
+      'at react-debug-source:///Users/me/project/src/components/Foo.tsx:12:5'
+    );
+
+    expect(result).toEqual({
+      source: '/Users/me/project/src/components/Foo.tsx',
+      line: 12,
+      column: 4,
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('prefixes project-relative file names with the source root', async () => {
+    configureSourceRoot('/Users/me/project');
+    const result = await resolveLocation('at react-debug-source://./src/Foo.tsx:3:1');
+
+    expect(result?.source).toBe('/Users/me/project/src/Foo.tsx');
+    expect(result?.column).toBe(0);
+  });
+});
