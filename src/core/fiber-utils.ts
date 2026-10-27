@@ -1,3 +1,4 @@
+import { DEBUG_SOURCE_SCHEME } from './source-location-resolver';
 import type { ClickToNodeInfo, Fiber } from './types';
 
 export function getComponentName(fiber: Fiber): string {
@@ -142,10 +143,28 @@ export function isUnresolvableFrame(line: string): boolean {
   return false;
 }
 
-/** Extracts the relevant stack-trace frame from a fiber's `_debugStack`. */
+/**
+ * Builds a synthetic stack frame from React ≤18's `_debugSource`, e.g.
+ * `at react-debug-source:///abs/path/Foo.tsx:12:5`. `resolveLocation` maps
+ * the scheme straight to the file without fetching source maps.
+ */
+export function getDebugSourceFrame(fiber: Fiber): string | undefined {
+  try {
+    const source = fiber._debugSource;
+    if (!source?.fileName || !source.lineNumber) return undefined;
+    return `at ${DEBUG_SOURCE_SCHEME}${source.fileName}:${source.lineNumber}:${source.columnNumber ?? 1}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Extracts the relevant stack-trace frame from a fiber's `_debugStack`, falling
+ * back to a synthetic frame built from `_debugSource` on React ≤18.
+ */
 export function getStackFrame(fiber: Fiber): string | undefined {
   const stack = fiber._debugStack?.stack;
-  if (!stack) return undefined;
+  if (!stack) return getDebugSourceFrame(fiber);
 
   const lines = stack.split('\n');
   const meaningfulLines: string[] = [];
