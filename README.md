@@ -136,6 +136,53 @@ Each entry in the chain is a `ComponentHandle` with the component name and props
 
 The callback can return synchronously (just a number) or asynchronously (a Promise). Returning `null` or `undefined` falls back to the default behaviour.
 
+## Chain Transformers
+
+A chain transformer rewrites the component chain before it is displayed in the Alt + Shift + Right Click popover (and before Alt + Right Click picks its target). It can collapse, relabel, or remove entries, and point navigation at a specific prop instead of the component call site.
+
+The built-in transformer for `react-intl` collapses `span → FormattedMessage` into the message text and navigates to the `defaultMessage` prop in your source:
+
+```tsx
+import { ShowComponent, createFormattedMessageTransformer } from 'show-component';
+
+<ShowComponent chainTransformer={createFormattedMessageTransformer()} />
+```
+
+For other libraries, combine presets or write your own rules:
+
+```tsx
+import { ShowComponent, TRANSFORMER_PRESETS, createRuleBasedTransformer } from 'show-component';
+
+const transformer = createRuleBasedTransformer([
+  TRANSFORMER_PRESETS['react-intl'],
+  TRANSFORMER_PRESETS['react-i18next'], // <Trans defaults="…">
+  {
+    id: 'my-text',
+    name: 'MyText',
+    componentName: 'MyText',
+    labelProp: 'text',
+    navigateToProp: 'text',
+    matchStrategy: 'direct',
+  },
+]);
+
+<ShowComponent chainTransformer={transformer} />
+```
+
+A `ChainTransformer` is a plain synchronous function `(chain, context) => TransformedEntry[]`, so you can also write one from scratch; see the `ChainTransformer`, `TransformedEntry` and `TransformerRule` types.
+
+## Chrome Extension
+
+The [`extension/`](extension) directory contains a Chrome (Manifest V3) extension that provides the same Alt + Right Click navigation on any page running a React 19 development build, without adding `<ShowComponent />` to the app. Its options page configures the source root, editor scheme, transformers, component/folder disallow lists, and the origins it is enabled on.
+
+Each [GitHub release](https://github.com/sidorares/show-component/releases) has the extension zip attached. To build it yourself:
+
+```bash
+npm ci && cd extension && npm ci && npm run build
+```
+
+Then load `extension/dist` as an unpacked extension in `chrome://extensions` (enable Developer Mode).
+
 ## API
 
 ### `<ShowComponent />`
@@ -146,10 +193,16 @@ The callback can return synchronously (just a number) or asynchronously (a Promi
 | `editorScheme` | `string` | `"cursor"` | URL scheme for editor navigation (e.g. `"vscode"`, `"vscode-insiders"`, `"windsurf"`). See [Editor Scheme](#editor-scheme). |
 | `onNavigate` | `(event: NavigationEvent) => void` | — | Custom navigation handler. Replaces the default protocol call. |
 | `getClickTarget` | `(chain: ComponentHandle[]) => number \| null \| undefined \| Promise<…>` | — | Customise which component Alt+Right-Click navigates to. See [Custom Click Target](#custom-click-target). |
+| `chainTransformer` | `ChainTransformer` | — | Rewrite the component chain before it is shown or navigated. See [Chain Transformers](#chain-transformers). |
+| `debug` | `boolean` | `false` | Log every source-map resolution step and the final editor URL to the console. |
 
 ### `configureSourceRoot(root: string | undefined)`
 
 Sets the source root programmatically. Equivalent to the `sourceRoot` prop.
+
+### `clearCaches()`
+
+Clears the resolved-location and source-map caches. Useful after a rebuild that changed bundle URLs without a page reload, or between tests.
 
 ### `NavigationEvent`
 
@@ -182,8 +235,9 @@ interface ComponentHandle {
 
 ## Requirements
 
-- React 16.8+ (uses fiber internals available in development builds)
-- Development mode only — fiber debug info (`_debugOwner`, `_debugStack`) is stripped in production builds
+- **React 19+ for source navigation.** Locations come from `_debugStack`, which only React 19 attaches to fibers. The peer range is `>=16.8.0` so the package installs alongside older React, but on React 18 and earlier it cannot resolve any locations (see [Background](#background)).
+- **Development builds only.** `<ShowComponent />` renders nothing unless `process.env.NODE_ENV === 'development'`, and React strips the fiber debug info (`_debugOwner`, `_debugStack`) from production builds anyway.
+- **Source maps** must be emitted by your bundler (inline or external `.map` files).
 
 ## License
 
