@@ -41,27 +41,31 @@ jobs:
           echo "ZIP_SIZE=$(du -h show-component-chrome-extension.zip | cut -f1)" >> $GITHUB_ENV
 
       - name: Upload extension artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         id: artifact-upload
         with:
-          name: show-component-chrome-extension
+          # Upload the zip as-is so the download link yields it directly,
+          # not wrapped in a second zip. The artifact is named after the file.
           path: show-component-chrome-extension.zip
+          archive: false
           retention-days: 30
 
       - name: Comment on PR with artifact link
         # Fork PRs get a read-only GITHUB_TOKEN, so commenting would fail the job.
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
+        env:
+          ARTIFACT_URL: ${{ steps.artifact-upload.outputs.artifact-url }}
         with:
           script: |
-            const artifactUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const body = [
               '### Chrome Extension Build',
               '',
               `Extension built successfully (${process.env.ZIP_SIZE}).`,
               '',
-              `[Download extension zip](${artifactUrl}) from the **Artifacts** section of this workflow run.`,
+              `**[Download extension zip](${process.env.ARTIFACT_URL})** (from [this workflow run](${runUrl}); requires being signed in to GitHub).`,
               '',
               'To install: unzip and load as an unpacked extension in `chrome://extensions` (enable Developer Mode).',
             ].join('\n');
