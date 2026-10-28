@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.4.0](https://github.com/sidorares/show-component/compare/show-component-v2.3.0...show-component-v2.4.0) (2026-10-28)
+
+
+### Features
+
+* fall back to _debugSource on React 18 ([a8339d8](https://github.com/sidorares/show-component/commit/a8339d8ece5660d3ea0dabc5d25700b6837173c8))
+* fall back to _debugSource on React 18 ([6467089](https://github.com/sidorares/show-component/commit/6467089b1dff504d1e65672799c1c47d84a517b7))
+
+
+### Bug Fixes
+
+* **extension:** honour the Enabled Origins option ([55ad6c8](https://github.com/sidorares/show-component/commit/55ad6c8c0dfc0c811801b2b2a19294860a81820a))
+* **extension:** limit injection to local dev hosts and granted sites ([bbd8884](https://github.com/sidorares/show-component/commit/bbd8884c4417223a795d4c1f2aef21d7d8d11762))
+* **extension:** limit injection to local dev hosts and granted sites ([9d0fb25](https://github.com/sidorares/show-component/commit/9d0fb2552ede906c87140ae2191b27e04aa753f6))
+
 ## [2.3.0](https://github.com/sidorares/show-component/compare/show-component-v2.2.1...show-component-v2.3.0) (2026-02-25)
 
 
