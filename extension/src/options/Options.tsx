@@ -3,6 +3,12 @@ import { createRoot } from 'react-dom/client';
 import { TRANSFORMER_PRESETS } from '../../../src/transformers/transformer-rule';
 import type { TransformerRule } from '../../../src/transformers/transformer-rule';
 import {
+  LOCAL_DEV_MATCHES,
+  extraGrantedPatterns,
+  normalizeOrigin,
+  originToMatchPattern,
+} from '../shared/origins';
+import {
   DEFAULT_OPTIONS,
   type ExtensionOptions,
   loadOptions,
@@ -153,18 +159,12 @@ function OptionsApp() {
         />
       </Section>
 
-      {/* Enabled Origins */}
+      {/* Site Access */}
       <Section
-        label="Enabled Origins"
-        hint="Leave empty to enable on all origins. Otherwise, list origins where the extension should be active (one per line)."
+        label="Site Access"
+        hint="Show Component always runs on local dev hosts (localhost, *.localhost, 127.0.0.1). Add other sites, such as a LAN address or a staging server, and Chrome will ask you to grant access. Changes here apply immediately."
       >
-        <textarea
-          style={styles.textarea}
-          placeholder={'http://localhost:3000\nhttps://staging.example.com'}
-          value={opts.enabledOrigins.join('\n')}
-          onChange={(e) => update('enabledOrigins', parseList(e.target.value))}
-          rows={3}
-        />
+        <SiteAccessConfig />
       </Section>
 
       {/* Debug */}
@@ -186,6 +186,105 @@ function OptionsApp() {
         </button>
         {saved && <span style={{ color: '#16a34a', fontSize: 13 }}>Saved</span>}
       </div>
+    </div>
+  );
+}
+
+// ─── Site access ─────────────────────────────────────────────────────────────
+
+function describePattern(pattern: string): string {
+  if (pattern === '<all_urls>' || pattern === '*://*/*') return 'All sites';
+  return pattern.replace(/\/\*$/, '');
+}
+
+function SiteAccessConfig() {
+  const [granted, setGranted] = useState<string[]>([]);
+  const [localGranted, setLocalGranted] = useState(true);
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    chrome.permissions.getAll().then(({ origins = [] }) => {
+      setGranted(extraGrantedPatterns(origins));
+      setLocalGranted(LOCAL_DEV_MATCHES.every((p) => origins.includes(p)));
+    });
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    chrome.permissions.onAdded.addListener(refresh);
+    chrome.permissions.onRemoved.addListener(refresh);
+    return () => {
+      // @types/chrome omits removeListener on these events; the runtime has it.
+      (chrome.permissions.onAdded as chrome.events.Event<() => void>).removeListener(refresh);
+      (chrome.permissions.onRemoved as chrome.events.Event<() => void>).removeListener(refresh);
+    };
+  }, [refresh]);
+
+  const request = (origins: string[]) => {
+    chrome.permissions
+      .request({ origins })
+      .then((ok) => {
+        setError(ok ? null : 'Access was not granted.');
+        if (ok) setInput('');
+      })
+      .catch((err: Error) => setError(err.message));
+  };
+
+  const add = () => {
+    const raw = input.trim();
+    const origin = normalizeOrigin(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`);
+    const pattern = origin && originToMatchPattern(origin);
+    if (!pattern) {
+      setError('Enter an http(s) address, e.g. https://staging.example.com');
+      return;
+    }
+    request([pattern]);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {!localGranted && (
+        <div style={styles.warning}>
+          Chrome is withholding access to local dev hosts (site access is restricted in
+          chrome://extensions).{' '}
+          <button type="button" style={styles.linkBtn} onClick={() => request(LOCAL_DEV_MATCHES)}>
+            Grant access
+          </button>
+        </div>
+      )}
+      {granted.map((pattern) => (
+        <div key={pattern} style={styles.listRow}>
+          <span style={{ flex: 1 }}>{describePattern(pattern)}</span>
+          <button
+            type="button"
+            style={styles.removeBtn}
+            onClick={() => chrome.permissions.remove({ origins: [pattern] })}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          type="text"
+          style={styles.input}
+          placeholder="https://staging.example.com"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') add();
+          }}
+        />
+        <button
+          type="button"
+          style={{ ...styles.saveBtn, padding: '5px 14px', fontSize: 12, whiteSpace: 'nowrap' }}
+          onClick={add}
+        >
+          + Add Site
+        </button>
+      </div>
+      {error && <span style={{ color: '#ef4444', fontSize: 12 }}>{error}</span>}
     </div>
   );
 }
@@ -479,6 +578,41 @@ const styles = {
     gap: 6,
     fontSize: 13,
     cursor: 'pointer',
+  } as const,
+  listRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '4px 8px',
+    background: '#f9fafb',
+    borderRadius: 4,
+    fontSize: 12,
+    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+  } as const,
+  removeBtn: {
+    border: 'none',
+    background: 'transparent',
+    color: '#ef4444',
+    cursor: 'pointer',
+    fontSize: 12,
+    padding: '2px 4px',
+  } as const,
+  linkBtn: {
+    border: 'none',
+    background: 'transparent',
+    color: '#2563eb',
+    cursor: 'pointer',
+    fontSize: 12,
+    padding: 0,
+    textDecoration: 'underline',
+  } as const,
+  warning: {
+    padding: '6px 10px',
+    background: '#fffbeb',
+    border: '1px solid #fde68a',
+    borderRadius: 6,
+    fontSize: 12,
+    color: '#78350f',
   } as const,
   saveBtn: {
     padding: '8px 20px',

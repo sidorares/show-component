@@ -25,7 +25,8 @@ import type { GetOptionsResponse, ResolvedLocationMessage } from '../shared/mess
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
-let extensionEnabled = true;
+// Stays off until the bridge confirms this origin is allowed.
+let extensionEnabled = false;
 let sourceRoot = '';
 let debug = false;
 let componentDisallowList: string[] = [];
@@ -41,19 +42,16 @@ window.addEventListener('message', (event) => {
 
   if (event.data.type === 'OPTIONS_UPDATE') {
     const opts = event.data.payload as GetOptionsResponse;
-    // An empty origin list means "enabled everywhere"
-    const enabledOrigins = (opts.enabledOrigins || []).map((o) => o.replace(/\/+$/, ''));
-    extensionEnabled =
-      opts.enabled && (enabledOrigins.length === 0 || enabledOrigins.includes(location.origin));
+    // null: extension disabled or this origin isn't granted
+    extensionEnabled = opts !== null;
+    if (!opts) return;
     sourceRoot = opts.sourceRoot || '';
     debug = opts.debug;
     componentDisallowList = opts.componentDisallowList || [];
     folderDisallowList = opts.folderDisallowList || [];
     mergeConsecutive = opts.mergeConsecutive;
 
-    if (sourceRoot) {
-      configureSourceRoot(sourceRoot);
-    }
+    configureSourceRoot(sourceRoot || undefined);
 
     // Rebuild transformer from enabled presets + custom rules
     const rules: TransformerRule[] = [];

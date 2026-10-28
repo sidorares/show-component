@@ -3,6 +3,7 @@
   "name": "Show Component",
   "version": "1.0.0",
   "description": "Navigate to the source code of any React component. Right-click any element to jump to the exact line that renders it.",
+  "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -12,21 +13,48 @@
     "activeTab",
     "scripting",
     "storage",
-    "contextMenus"
+    "contextMenus",
+    "declarativeContent"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "http://localhost/*",
+    "https://localhost/*",
+    "http://*.localhost/*",
+    "https://*.localhost/*",
+    "http://127.0.0.1/*",
+    "https://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
   ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content/main-world.js"],
+      "matches": [
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://*.localhost/*",
+        "https://*.localhost/*",
+        "http://127.0.0.1/*",
+        "https://127.0.0.1/*"
+      ],
+      "js": [
+        "content/main-world.js"
+      ],
       "world": "MAIN",
       "run_at": "document_idle"
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["content/bridge.js"],
+      "matches": [
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://*.localhost/*",
+        "https://*.localhost/*",
+        "http://127.0.0.1/*",
+        "https://127.0.0.1/*"
+      ],
+      "js": [
+        "content/bridge.js"
+      ],
       "run_at": "document_idle"
     }
   ],

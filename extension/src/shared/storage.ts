@@ -10,7 +10,6 @@ export interface ExtensionOptions {
   componentDisallowList: string[];
   folderDisallowList: string[];
   mergeConsecutive: boolean;
-  enabledOrigins: string[];
   enabledTransformers: string[];
   customTransformerRules: TransformerRule[];
 }
@@ -23,7 +22,6 @@ export const DEFAULT_OPTIONS: ExtensionOptions = {
   componentDisallowList: [],
   folderDisallowList: [],
   mergeConsecutive: false,
-  enabledOrigins: [],
   enabledTransformers: ['react-intl', 'react-i18next'],
   customTransformerRules: [],
 };
