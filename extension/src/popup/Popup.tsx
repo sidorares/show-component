@@ -1,39 +1,67 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { normalizeOrigin, originToMatchPattern } from '../shared/origins';
 import { type ExtensionOptions, loadOptions, saveOptions } from '../shared/storage';
+
+type ReactBuild = 'checking' | 'development' | 'production' | 'none' | 'unknown';
+
+interface SiteAccess {
+  tabId: number;
+  origin: string;
+  pattern: string;
+  granted: boolean;
+}
+
+/** Runs in the page (MAIN world). Must be self-contained — it is serialized. */
+function detectReactBuild(): 'development' | 'production' | 'none' {
+  for (const node of document.querySelectorAll('*')) {
+    const key = Object.getOwnPropertyNames(node).find((p) => p.startsWith('__reactFiber'));
+    if (!key) continue;
+    // Development builds define the _debug* fields on every fiber.
+    const fiber = (node as unknown as Record<string, object>)[key];
+    return '_debugOwner' in fiber ? 'development' : 'production';
+  }
+  return 'none';
+}
+
+const REACT_BADGE: Record<ReactBuild, { text: string; bg: string; fg: string }> = {
+  checking: { text: 'Checking...', bg: '#e5e7eb', fg: '#6b7280' },
+  development: { text: 'Development build', bg: '#dcfce7', fg: '#166534' },
+  production: { text: 'Production build', bg: '#fef3c7', fg: '#92400e' },
+  none: { text: 'Not found', bg: '#fee2e2', fg: '#991b1b' },
+  unknown: { text: 'Unknown', bg: '#e5e7eb', fg: '#6b7280' },
+};
 
 function PopupApp() {
   const [opts, setOpts] = useState<ExtensionOptions | null>(null);
-  const [reactDetected, setReactDetected] = useState<boolean | null>(null);
+  const [reactBuild, setReactBuild] = useState<ReactBuild>('checking');
+  // undefined: still loading; null: not an http(s) page
+  const [site, setSite] = useState<SiteAccess | null | undefined>(undefined);
 
   useEffect(() => {
     loadOptions().then(setOpts);
 
+    // Opening the popup grants activeTab, so this works even on sites the
+    // extension has no host permission for.
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tabId = tabs[0]?.id;
-      if (!tabId) return;
+      const tab = tabs[0];
+      if (tab?.id === undefined) return;
+      const tabId = tab.id;
+
+      const origin = tab.url ? normalizeOrigin(tab.url) : null;
+      const pattern = origin ? originToMatchPattern(origin) : null;
+      if (origin && pattern) {
+        chrome.permissions
+          .contains({ origins: [pattern] })
+          .then((granted) => setSite({ tabId, origin, pattern, granted }));
+      } else {
+        setSite(null);
+      }
 
       chrome.scripting
-        .executeScript({
-          target: { tabId },
-          func: () => {
-            const el = document.querySelector('[data-reactroot]');
-            if (el) return true;
-            const allEls = document.querySelectorAll('*');
-            for (const node of allEls) {
-              const props = Object.getOwnPropertyNames(node);
-              if (props.some((p) => p.startsWith('__reactFiber'))) return true;
-            }
-            return false;
-          },
-          world: 'MAIN',
-        })
-        .then((results) => {
-          setReactDetected(results?.[0]?.result === true);
-        })
-        .catch(() => {
-          setReactDetected(false);
-        });
+        .executeScript({ target: { tabId }, func: detectReactBuild, world: 'MAIN' })
+        .then((results) => setReactBuild(results?.[0]?.result ?? 'unknown'))
+        .catch(() => setReactBuild('unknown'));
     });
   }, []);
 
@@ -44,9 +72,29 @@ function PopupApp() {
     setOpts((prev) => (prev ? { ...prev, enabled: newEnabled } : prev));
   }, [opts]);
 
+  const enableOnSite = useCallback(async () => {
+    if (!site) return;
+    // On some platforms the popup closes while Chrome shows the prompt; the
+    // background picks up the new permission either way via permissions.onAdded.
+    const granted = await chrome.permissions.request({ origins: [site.pattern] });
+    if (!granted) return;
+    chrome.runtime.sendMessage({ type: 'RELOAD_AFTER_SYNC', tabId: site.tabId });
+    window.close();
+  }, [site]);
+
   if (!opts) {
     return <div style={s.loading}>Loading...</div>;
   }
+
+  const badge = REACT_BADGE[reactBuild];
+  const siteBadge =
+    site === undefined
+      ? { text: 'Checking...', bg: '#e5e7eb', fg: '#6b7280' }
+      : site === null
+        ? { text: 'Unavailable', bg: '#e5e7eb', fg: '#6b7280' }
+        : site.granted
+          ? { text: 'Active', bg: '#dcfce7', fg: '#166534' }
+          : { text: 'Not enabled', bg: '#fef3c7', fg: '#92400e' };
 
   return (
     <div style={s.container}>
@@ -70,19 +118,34 @@ function PopupApp() {
         </button>
       </div>
 
+      {/* Site access */}
+      <div style={s.statusRow}>
+        <span style={s.statusLabel}>This site</span>
+        <span style={{ ...s.badge, background: siteBadge.bg, color: siteBadge.fg }}>
+          {siteBadge.text}
+        </span>
+      </div>
+
       {/* React detection */}
       <div style={s.statusRow}>
         <span style={s.statusLabel}>React on page</span>
-        <span
-          style={{
-            ...s.badge,
-            background: reactDetected === null ? '#e5e7eb' : reactDetected ? '#dcfce7' : '#fee2e2',
-            color: reactDetected === null ? '#6b7280' : reactDetected ? '#166534' : '#991b1b',
-          }}
-        >
-          {reactDetected === null ? 'Checking...' : reactDetected ? 'Detected' : 'Not found'}
-        </span>
+        <span style={{ ...s.badge, background: badge.bg, color: badge.fg }}>{badge.text}</span>
       </div>
+
+      {site && !site.granted && (
+        <div style={s.notice}>
+          Show Component doesn't run on <strong>{site.origin}</strong> yet.
+          <button type="button" style={s.enableBtn} onClick={enableOnSite}>
+            Enable on this site
+          </button>
+        </div>
+      )}
+      {site === null && <div style={s.notice}>Show Component only works on http(s) pages.</div>}
+      {reactBuild === 'production' && (
+        <div style={s.notice}>
+          This page runs a production build of React. Source navigation needs a development build.
+        </div>
+      )}
 
       {/* Current config summary */}
       <div style={s.configRow}>
@@ -164,6 +227,30 @@ const s = {
     fontSize: 11,
     fontWeight: 500,
     borderRadius: 10,
+  } as const,
+  notice: {
+    margin: '4px 12px 8px',
+    padding: '8px 10px',
+    background: '#fffbeb',
+    border: '1px solid #fde68a',
+    borderRadius: 6,
+    fontSize: 11,
+    lineHeight: 1.5,
+    color: '#78350f',
+    wordBreak: 'break-word' as const,
+  } as const,
+  enableBtn: {
+    display: 'block',
+    width: '100%',
+    marginTop: 6,
+    padding: '6px 0',
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#fff',
+    background: '#2563eb',
+    border: 'none',
+    borderRadius: 6,
+    cursor: 'pointer',
   } as const,
   configRow: {
     display: 'flex',

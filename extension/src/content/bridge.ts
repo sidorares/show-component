@@ -10,6 +10,8 @@ import type { GetOptionsResponse } from '../shared/messaging';
 
 // ─── Forward options to MAIN world ───────────────────────────────────────────
 
+// The background replies null (extension disabled, or no access to this origin)
+// so the page never sees options it shouldn't.
 async function sendOptionsToPage(): Promise<void> {
   const opts: GetOptionsResponse = await chrome.runtime.sendMessage({
     type: 'GET_OPTIONS',
@@ -31,29 +33,14 @@ window.addEventListener('message', (event) => {
   }
 
   if (type === 'RESOLVED_LOCATION' && payload) {
-    const loc = payload as {
+    // The page can forge this message; the background validates the sender's
+    // origin and the payload, and picks the editor scheme itself.
+    const { source, line, column } = payload as {
       source: string;
       line: number;
       column: number;
-      componentName?: string;
     };
-
-    chrome.runtime
-      .sendMessage({
-        type: 'GET_OPTIONS',
-      })
-      .then((opts: GetOptionsResponse) => {
-        const editorScheme = opts.editorScheme || 'cursor';
-        chrome.runtime.sendMessage({
-          type: 'OPEN_EDITOR',
-          payload: {
-            source: loc.source,
-            line: loc.line,
-            column: loc.column,
-            editorScheme,
-          },
-        });
-      });
+    chrome.runtime.sendMessage({ type: 'OPEN_EDITOR', payload: { source, line, column } });
     return;
   }
 });

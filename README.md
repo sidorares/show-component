@@ -173,7 +173,7 @@ A `ChainTransformer` is a plain synchronous function `(chain, context) => Transf
 
 ## Chrome Extension
 
-The [`extension/`](extension) directory contains a Chrome (Manifest V3) extension that provides the same Alt + Right Click navigation on any page running a React 19 development build, without adding `<ShowComponent />` to the app. Its options page configures the source root, editor scheme, transformers, component/folder disallow lists, and the origins it is enabled on.
+The [`extension/`](extension) directory contains a Chrome (Manifest V3) extension that provides the same Alt + Right Click navigation on any page running a React 19 development build, without adding `<ShowComponent />` to the app. It runs on local dev hosts (`localhost`, `*.localhost`, `127.0.0.1`) out of the box; other sites (a LAN address, a staging server) can be enabled from the toolbar popup or the options page, which asks Chrome for access to that site. The toolbar icon is greyed out on sites where it isn't active. The options page also configures the source root, editor scheme, transformers, and component/folder disallow lists.
 
 Each [GitHub release](https://github.com/sidorares/show-component/releases) has the extension zip attached. To build it yourself:
 

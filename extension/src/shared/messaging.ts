@@ -42,30 +42,44 @@ export interface GetOptionsRequest {
 
 import type { TransformerRule } from '../../../src/transformers/transformer-rule';
 
-export interface GetOptionsResponse {
-  enabled: boolean;
+/**
+ * The subset of options the MAIN-world script needs. Anything posted to the
+ * page is readable by the page's own scripts, so keep this minimal. The
+ * background answers `null` when the extension is disabled or the sender's
+ * origin has no host permission.
+ */
+export interface PageOptions {
   sourceRoot: string;
-  editorScheme: string;
   debug: boolean;
   componentDisallowList: string[];
   folderDisallowList: string[];
   mergeConsecutive: boolean;
-  enabledOrigins: string[];
   enabledTransformers: string[];
   customTransformerRules: TransformerRule[];
 }
 
+export type GetOptionsResponse = PageOptions | null;
+
+/** The editor scheme is read from storage by the background, never taken from the page. */
 export interface OpenEditorRequest {
   type: 'OPEN_EDITOR';
   payload: {
     source: string;
     line: number;
     column: number;
-    editorScheme: string;
   };
 }
 
-export type BridgeToBackgroundMessage = GetOptionsRequest | OpenEditorRequest;
+/** Popup → background, after the user granted access to the active tab's site. */
+export interface ReloadAfterSyncRequest {
+  type: 'RELOAD_AFTER_SYNC';
+  tabId: number;
+}
+
+export type BridgeToBackgroundMessage =
+  | GetOptionsRequest
+  | OpenEditorRequest
+  | ReloadAfterSyncRequest;
 
 // ─── Background → Bridge (response) ─────────────────────────────────────────
 
